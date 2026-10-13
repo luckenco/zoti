@@ -1,0 +1,16 @@
+{
+  "name": "@private-life/schema",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "effect": "3.22.2"
+  },
+  "devDependencies": {
+    "@effect/vitest": "0.30.0",
+    "vitest": "3.2.6"
+  }
+}

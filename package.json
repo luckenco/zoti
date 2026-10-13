@@ -1,0 +1,14 @@
+{
+  "name": "private-life",
+  "private": true,
+  "packageManager": "pnpm@10.33.4",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p packages/schema && tsc --noEmit -p apps/worker && tsc --noEmit -p apps/cli && tsc --noEmit -p apps/extension && tsc --noEmit -p infra",
+    "test": "vitest run",
+    "extension:build": "pnpm --filter @private-life/extension build"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "3.2.6"
+  }
+}
