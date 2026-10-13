@@ -8,7 +8,7 @@
     "infra"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p packages/schema && tsc --noEmit -p apps/worker && tsc --noEmit -p apps/cli && tsc --noEmit -p apps/extension && tsc --noEmit -p infra",
+    "typecheck": "tsc --noEmit -p packages/schema && tsc --noEmit -p apps/worker && tsc --noEmit -p apps/extension && tsc --noEmit -p infra",
     "test": "vitest run",
     "extension:build": "bun run --filter @herodotus/extension build"
   },

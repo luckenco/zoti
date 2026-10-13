@@ -1,9 +1,16 @@
 import { Misconfigured, StoreWriteFailed } from "@herodotus/schema"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { Client } from "pg"
-import type { SqlStatement } from "./sql"
-import { identifier } from "./sql"
-import { itemStoreLayer, SqlTransport, type ItemStore } from "./store"
+import { identifier, insertRecords, type SettledRow, type SqlStatement } from "./sql"
+
+export class ItemStore extends Context.Tag("ItemStore")<
+  ItemStore,
+  {
+    readonly put: (
+      rows: ReadonlyArray<SettledRow>,
+    ) => Effect.Effect<void, StoreWriteFailed | Misconfigured>
+  }
+>() {}
 
 export interface SqlSession {
   readonly query: (statement: SqlStatement) => Promise<void>
@@ -79,12 +86,13 @@ const pgOpen = (connectionString: string): Promise<SqlSession> => {
   }))
 }
 
-export const motherDuckTransportLayer = (config: MotherDuckConfig): Layer.Layer<SqlTransport> =>
+export const motherDuckLayer = (config: MotherDuckConfig): Layer.Layer<ItemStore> =>
   Layer.effect(
-    SqlTransport,
+    ItemStore,
     Effect.sync(() => ({
-      execute: (statement) =>
+      put: (rows) =>
         Effect.gen(function* () {
+          if (rows.length === 0) return
           const host = yield* hostname(config.host)
           const database = yield* databaseSetting(config.database)
           const token = yield* setting("MOTHERDUCK_TOKEN", config.token)
@@ -95,7 +103,7 @@ export const motherDuckTransportLayer = (config: MotherDuckConfig): Layer.Layer<
             catch: (error) => logFailure(token, error),
           })
           yield* Effect.tryPromise({
-            try: () => session.query(statement),
+            try: () => session.query(insertRecords(database, rows)),
             catch: (error) => logFailure(token, error),
           }).pipe(
             Effect.ensuring(
@@ -108,6 +116,3 @@ export const motherDuckTransportLayer = (config: MotherDuckConfig): Layer.Layer<
         }),
     })),
   )
-
-export const motherDuckLayer = (config: MotherDuckConfig): Layer.Layer<ItemStore> =>
-  itemStoreLayer(config.database).pipe(Layer.provide(motherDuckTransportLayer(config)))

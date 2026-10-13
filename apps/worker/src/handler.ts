@@ -17,8 +17,8 @@ import {
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { TreeFormatter } from "effect/ParseResult"
 import { Auth } from "./auth"
+import { ItemStore } from "./motherduck"
 import type { SettledRow } from "./sql"
-import { ItemStore } from "./store"
 import { RateLimit } from "./rate-limit"
 
 export class IdSource extends Context.Tag("IdSource")<

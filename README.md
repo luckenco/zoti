@@ -1,6 +1,6 @@
 # Herodotus
 
-Save notes and sources—videos, tweets, posts, pages, selections—with human or agent attribution. A Cloudflare Worker accepts captures from the CLI and Chrome extension and upserts them into MotherDuck. There is no read API yet.
+Save notes and sources—videos, tweets, posts, pages, selections—with human or agent attribution. A Cloudflare Worker accepts captures from the Chrome extension and upserts them into MotherDuck. There is no read API yet.
 
 ## Development
 
@@ -13,7 +13,7 @@ bun run extension:build
 
 - `packages/schema`: request/response contract
 - `apps/worker`: authentication, validation, ingestion
-- `apps/cli`, `apps/extension`: capture clients
+- `apps/extension`: capture client
 - `infra/alchemy.run.ts`: Cloudflare deployment
 - `duckdb`: records table
 
@@ -49,24 +49,6 @@ The Worker is `herodotus-ingress`. Keep the same stage and working directory for
 The Worker stamps `actor` and `agent` from the token. Requests that set either are rejected. `kind` and `via` are free strings. See `packages/schema/src/contract.ts` for validation and limits.
 
 Reuse `id` and `ts` on retry. The same id updates that row.
-
-## CLI
-
-Create `~/.config/herodotus/config.json` with mode `0600`:
-
-```json
-{
-  "url": "https://herodotus-ingress.<account>.workers.dev",
-  "tokens": { "you": "<human-token>", "pi": "<agent-token>" }
-}
-```
-
-```sh
-bun run --filter @herodotus/cli ingest -- \
-  --as you --kind note --text "ship the schema" --tag etl
-```
-
-`--as` (or `HERODOTUS_AS`) is mandatory. `HERODOTUS_URL` overrides the configured URL. Optional flags: `--url`, `--text`, `--title`, `--author`, `--site`, `--published-at`, `--about`, and repeated `--tag`. `via` is always `cli`.
 
 ## Chrome extension
 
