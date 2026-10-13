@@ -1,5 +1,4 @@
--- Apply this while connected to the herodotus database.
--- One id is one row. The Worker upserts on that primary key.
+-- Apply while connected to the herodotus database.
 
 CREATE TABLE IF NOT EXISTS records (
     id UUID PRIMARY KEY,

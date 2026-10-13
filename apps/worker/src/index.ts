@@ -9,7 +9,6 @@ export const appLayer = (env: WorkerBindings) =>
   Layer.mergeAll(
     authLayer(env.AUTH_TOKENS),
     rateLimitLayer(env.INGEST_RATE_LIMITER),
-    // ItemStore is the only storage port. Swap this layer for self-hosted DuckDB.
     motherDuckLayer({
       host: env.MOTHERDUCK_HOST,
       database: env.MOTHERDUCK_DATABASE,

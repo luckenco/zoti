@@ -19,9 +19,7 @@ bun run extension:build
 
 ## Database and secrets
 
-Create a [MotherDuck](https://motherduck.com) database named `herodotus` and run `duckdb/migrations/001_records.sql` while connected to it. Create a read/write access token. MotherDuck does not offer an insert-only token. The Worker sends one upsert and nothing else. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization. The Worker connects on port 5432 with `sslmode=require`.
-
-The handler calls `ItemStore.put`. `motherDuckLayer` is the only code that opens MotherDuck. A later move to DuckDB on your own machines replaces that layer and runs the same SQL.
+Create a [MotherDuck](https://motherduck.com) database named `herodotus` and run `duckdb/migrations/001_records.sql` while connected to it. Create a read/write access token. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization.
 
 For deployment, put these in gitignored `infra/.env` (mode `0600`):
 
@@ -42,15 +40,15 @@ bun run alchemy deploy --stage prod --dry-run
 bun run alchemy deploy --stage prod
 ```
 
-The Worker is `herodotus-ingress`. Keep the same stage and working directory for future deployments; preserve `.alchemy` deployment state securely. Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (configured for 60 requests per minute per identity, per Cloudflare location).
+The Worker is `herodotus-ingress`. Keep the same stage and working directory for future deployments; preserve `.alchemy` deployment state securely. Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (60 requests per minute per identity, per Cloudflare location).
 
 ## Records
 
-`POST /v1/records` takes `{"schemaVersion":1,"records":[...]}` with `Authorization: Bearer <token>`. Required record fields: `kind`, `via`, `tags`, `ts`. Optional: `id`, `url`, `text`, `title`, `author`, `site`, `publishedAt`, `aboutId`. A record needs text or a URL; `aboutId` links a note to another record.
+`POST /v1/records` takes `{"schemaVersion":1,"records":[...]}` with `Authorization: Bearer <token>`. Required record fields: `kind`, `via`, `tags`, `ts`. Optional: `id`, `url`, `text`, `title`, `author`, `site`, `publishedAt`, `aboutId`. A record needs text or a URL. `aboutId` links a note to another record.
 
-The Worker stamps `actor` and `agent` from the token. Requests setting either are rejected. `kind` and `via` are free strings. See `packages/schema/src/contract.ts` for validation and limits.
+The Worker stamps `actor` and `agent` from the token. Requests that set either are rejected. `kind` and `via` are free strings. See `packages/schema/src/contract.ts` for validation and limits.
 
-Reuse `id` and `ts` on retry. There is no URL deduplication or edit API. Sending the same id again updates that one row, and `ingested_at` becomes the time of that write.
+Reuse `id` and `ts` on retry. The same id updates that row.
 
 ## CLI
 
@@ -68,10 +66,10 @@ bun run --filter @herodotus/cli ingest -- \
   --as you --kind note --text "ship the schema" --tag etl
 ```
 
-`--as` (or `HERODOTUS_AS`) is mandatory. `HERODOTUS_URL` overrides the configured URL. Optional flags: `--url`, `--text`, `--title`, `--author`, `--site`, `--published-at`, `--about`, and repeated `--tag`. Agents use their own identity/token; `via` is always `cli`.
+`--as` (or `HERODOTUS_AS`) is mandatory. `HERODOTUS_URL` overrides the configured URL. Optional flags: `--url`, `--text`, `--title`, `--author`, `--site`, `--published-at`, `--about`, and repeated `--tag`. `via` is always `cli`.
 
 ## Chrome extension
 
 Build with `bun run extension:build`, enable Developer mode at `chrome://extensions`, and load `apps/extension/dist`. Set the Worker URL and Chrome token in its options. Narrow `host_permissions` in `apps/extension/src/manifest.json` to the Worker origin, then rebuild and reload.
 
-The popup captures the URL, selected text, and basic page metadata; it infers video/tweet/page/selection from the hostname and selection. Overlong optional metadata is truncated. While the popup stays open, a failed save can retry the same capture with its original ID and timestamp.
+The popup captures the URL, selected text, and basic page metadata. It infers video, tweet, page, or selection from the hostname and selection. Overlong optional metadata is truncated. While the popup stays open, a failed save retries the same capture with its original id and timestamp.
