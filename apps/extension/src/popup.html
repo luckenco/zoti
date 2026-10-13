@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Save to private life</title>
+    <style>
+      body {
+        margin: 0;
+        width: 320px;
+        font: 14px/1.4 system-ui, sans-serif;
+        color: #1c1917;
+        background: #faf7f2;
+      }
+      main {
+        padding: 16px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      p {
+        margin: 0 0 12px;
+      }
+      label {
+        display: block;
+        margin-bottom: 12px;
+      }
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 4px;
+        padding: 8px;
+        border: 1px solid #d6d3d1;
+        border-radius: 6px;
+      }
+      button {
+        width: 100%;
+        padding: 8px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: #1c1917;
+        color: #faf7f2;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Save this page</h1>
+      <p id="status">Saves the selection, or the page title when nothing is selected.</p>
+      <label>
+        Tags
+        <input id="tags" type="text" placeholder="reading, later" />
+      </label>
+      <button id="save" type="button">Save</button>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

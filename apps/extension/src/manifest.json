@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Private life",
+  "version": "0.1.0",
+  "description": "Save the current page or selection into your private-life store.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "action": {
+    "default_title": "Save to private life",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Private life options</title>
+    <style>
+      body {
+        margin: 0;
+        font: 15px/1.4 system-ui, sans-serif;
+        color: #1c1917;
+        background: #faf7f2;
+      }
+      main {
+        max-width: 32rem;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+      p {
+        margin: 0 0 16px;
+      }
+      label {
+        display: block;
+        margin-bottom: 12px;
+      }
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 4px;
+        padding: 8px;
+        border: 1px solid #d6d3d1;
+        border-radius: 6px;
+      }
+      button {
+        padding: 8px 12px;
+        border: 0;
+        border-radius: 6px;
+        background: #1c1917;
+        color: #faf7f2;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Private life</h1>
+      <p>The worker URL is the deployed ingress. The token is the chrome entry from AUTH_TOKENS.</p>
+      <form id="settings">
+        <label>
+          Worker URL
+          <input id="workerUrl" type="url" name="workerUrl" required placeholder="https://private-life.example.workers.dev" />
+        </label>
+        <label>
+          Bearer token
+          <input id="token" type="password" name="token" required autocomplete="off" />
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <p id="status"></p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
