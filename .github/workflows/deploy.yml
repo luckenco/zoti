@@ -30,7 +30,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Check environment
         working-directory: infra
-        run: bun alchemy provider check-env
+        run: bun alchemy provider check-env --provider Cloudflare
       - name: Deploy
         working-directory: infra
         run: bun alchemy deploy --stage prod --yes
