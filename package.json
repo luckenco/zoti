@@ -8,11 +8,13 @@
     "infra"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p packages/schema && tsc --noEmit -p apps/worker && tsc --noEmit -p apps/extension && tsc --noEmit -p infra",
+    "typecheck": "tsc --noEmit -p packages/schema && tsc --noEmit -p apps/worker && tsc --noEmit -p apps/extension && tsc --noEmit -p infra && tsc --noEmit -p duckdb",
     "test": "vitest run",
+    "migrate": "bun duckdb/migrate.ts",
     "extension:build": "bun run --filter @herodotus/extension build"
   },
   "devDependencies": {
+    "pg": "8.16.3",
     "typescript": "5.9.3",
     "vitest": "3.2.6"
   }

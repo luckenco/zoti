@@ -15,11 +15,11 @@ bun run extension:build
 - `apps/worker`: authentication, validation, ingestion, MCP
 - `apps/extension`: capture client
 - `infra/alchemy.run.ts`: Cloudflare deployment
-- `duckdb`: records table
+- `duckdb`: schema migrations
 
 ## Database and secrets
 
-Create a [MotherDuck](https://motherduck.com) database named `herodotus` and run `duckdb/migrations/001_records.sql` while connected to it, then `duckdb/migrations/002_consumed_at.sql`. On a database that already has the table, run only `002_consumed_at.sql`. It adds a nullable `consumed_at` and is safe to re-run. Create a read/write access token. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization.
+Create a [MotherDuck](https://motherduck.com) database named `herodotus` and a read/write access token. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization. `bun run migrate` applies new files in `duckdb/migrations/` in order and records each filename in `schema_migrations`. Export `MOTHERDUCK_HOST`, `MOTHERDUCK_DATABASE`, and `MOTHERDUCK_TOKEN` first. Pushes to `main` run that command before the Worker deploy.
 
 For deployment, put these in gitignored `infra/.env` (mode `0600`):
 
@@ -69,7 +69,7 @@ The Worker stamps `actor` and `agent` from the token. Requests that set either a
 - `recent_items` returns the newest records, with the same limit and `unread` filter.
 - `mark_consumed` sets `consumed_at` to now for up to 100 ids. `consumed` defaults to true; pass false to clear it.
 
-Reads include `consumedAt`. Upserting the same id does not change `consumed_at`. Run `002_consumed_at.sql` before deploying this Worker.
+Reads include `consumedAt`. Upserting the same id does not change `consumed_at`.
 
 `grokbot` in `AUTH_TOKENS` above is that client: its own token, `"actor":"agent"`. Copy the same JSON into `apps/worker/.dev.vars` for local `wrangler dev`. Redeploy from `infra` with `bun run alchemy deploy --stage prod` so the Worker secret updates.
 

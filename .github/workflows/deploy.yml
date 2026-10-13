@@ -31,6 +31,8 @@ jobs:
       - name: Check environment
         working-directory: infra
         run: bun alchemy provider check-env --provider Cloudflare
+      - name: Migrate database
+        run: bun run migrate
       - name: Deploy
         working-directory: infra
         run: bun alchemy deploy --stage prod --yes
