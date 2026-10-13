@@ -4,5 +4,5 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["alchemy.run.ts"]
+  "include": ["alchemy.run.ts", "stacks/**/*.ts"]
 }

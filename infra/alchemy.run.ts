@@ -10,7 +10,7 @@ export default Alchemy.Stack(
   "herodotus",
   {
     providers: Cloudflare.providers(),
-    state: Alchemy.localState(),
+    state: Cloudflare.state(),
   },
   Effect.gen(function* () {
     yield* Cloudflare.Worker("Ingress", {

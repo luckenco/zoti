@@ -32,15 +32,30 @@ MOTHERDUCK_TOKEN='<read-write token>'
 
 Tokens must be distinct. Alchemy uploads these values as Worker secrets. For local development, copy `apps/worker/.dev.vars.example` to gitignored `apps/worker/.dev.vars`, fill it in, and run `bun run --filter @herodotus/worker dev`.
 
-Authenticate Alchemy with the intended Cloudflare account, then deploy from `infra`:
+Authenticate Alchemy with the intended Cloudflare account. Deployment state is remote. From `infra`, once, import the existing Worker into that store and confirm the prompt to deploy the state store:
 
 ```sh
 cd infra
-bun run alchemy deploy --stage prod --dry-run
+bun run alchemy deploy --stage prod --adopt
+```
+
+Later deploys omit `--adopt`:
+
+```sh
 bun run alchemy deploy --stage prod
 ```
 
-The Worker is `herodotus-ingress`. Keep the same stage and working directory for future deployments; preserve `.alchemy` deployment state securely. Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (60 requests per minute per identity, per Cloudflare location).
+The Worker is `herodotus-ingress`. Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (60 requests per minute per identity, per Cloudflare location).
+
+Pushes to `main` deploy `--stage prod`. Create the private GitHub repository, add `GITHUB_OWNER` and `GITHUB_REPOSITORY` to `infra/.env`, and create an `admin` profile with an API token or Global API Key that has Account API Tokens Write (not OAuth). That run also needs GitHub auth that can write Actions secrets. Then, from `infra`:
+
+```sh
+bun run alchemy profile create admin
+bun run alchemy profile edit --profile admin
+bun run alchemy deploy --config stacks/github.ts --profile admin --stage prod
+```
+
+That writes `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AUTH_TOKENS`, `MOTHERDUCK_HOST`, `MOTHERDUCK_DATABASE`, and `MOTHERDUCK_TOKEN` as Actions secrets.
 
 ## Records
 
