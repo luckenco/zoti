@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url"
 const main = fileURLToPath(new URL("../apps/worker/src/index.ts", import.meta.url))
 
 export default Alchemy.Stack(
-  "private-life",
+  "herodotus",
   {
     providers: Cloudflare.providers(),
     state: Alchemy.localState(),
   },
   Effect.gen(function* () {
     yield* Cloudflare.Worker("Ingress", {
-      name: "private-life-ingress",
+      name: "herodotus-ingress",
       main,
       compatibility: {
         date: "2026-10-13",

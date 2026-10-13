@@ -1,33 +1,47 @@
 import { Data, Schema } from "effect"
 
 export const schemaVersion = 1
-export const maxItems = 100
+export const maxRecords = 100
 export const maxTextLength = 100_000
 export const maxTagLength = 64
 export const maxTags = 32
 export const maxUrlLength = 2048
 export const maxKindLength = 64
+export const maxFieldLength = 512
 export const maxBodyBytes = 1_048_576
 
-export const ItemId = Schema.UUID.pipe(Schema.brand("ItemId"))
-export type ItemId = typeof ItemId.Type
+export const RecordId = Schema.UUID.pipe(Schema.brand("RecordId"))
+export type RecordId = typeof RecordId.Type
+
+// Stamped by the Worker from the bearer token. Never accepted in a request body.
+export const Actor = Schema.Literal("human", "agent")
+export type Actor = typeof Actor.Type
 
 const kind = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(maxKindLength))
 const tag = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(maxTagLength))
+const field = Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(maxFieldLength))))
 
-export class ItemInput extends Schema.Class<ItemInput>("ItemInput")({
-  id: Schema.optional(ItemId),
-  url: Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.maxLength(maxUrlLength)))),
-  text: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(maxTextLength)),
-  type: kind,
-  source: kind,
+export class RecordInput extends Schema.Class<RecordInput>("RecordInput")({
+  id: Schema.optional(RecordId),
+  kind,
+  via: kind,
+  url: Schema.optional(Schema.NullOr(Schema.String.pipe(Schema.minLength(1), Schema.maxLength(maxUrlLength)))),
+  title: field,
+  author: field,
+  site: field,
+  publishedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
+  aboutId: Schema.optional(Schema.NullOr(RecordId)),
+  text: Schema.optional(Schema.String.pipe(Schema.maxLength(maxTextLength))),
   tags: Schema.Array(tag).pipe(Schema.maxItems(maxTags)),
   ts: Schema.DateTimeUtc,
 }) {}
 
+const hasContent = (record: RecordInput) =>
+  (record.text ?? "").length > 0 || (record.url ?? "").length > 0 ? true : "a record needs text or url"
+
 export class IngestRequest extends Schema.Class<IngestRequest>("IngestRequest")({
   schemaVersion: Schema.Literal(schemaVersion),
-  items: Schema.Array(ItemInput).pipe(Schema.minItems(1), Schema.maxItems(maxItems)),
+  records: Schema.Array(RecordInput.pipe(Schema.filter(hasContent))).pipe(Schema.minItems(1), Schema.maxItems(maxRecords)),
 }) {}
 
 export class VersionProbe extends Schema.Class<VersionProbe>("VersionProbe")({
@@ -37,7 +51,7 @@ export class VersionProbe extends Schema.Class<VersionProbe>("VersionProbe")({
 export class IngestResponse extends Schema.Class<IngestResponse>("IngestResponse")({
   schemaVersion: Schema.Literal(schemaVersion),
   inserted: Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(1)),
-  ids: Schema.Array(ItemId).pipe(Schema.minItems(1), Schema.maxItems(maxItems)),
+  ids: Schema.Array(RecordId).pipe(Schema.minItems(1), Schema.maxItems(maxRecords)),
 }) {}
 
 export class InvalidBody extends Data.TaggedError("InvalidBody")<{

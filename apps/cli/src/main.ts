@@ -1,7 +1,7 @@
 import { Command, Options } from "@effect/cli"
 import { FetchHttpClient } from "@effect/platform"
 import { NodeContext, NodeRuntime } from "@effect/platform-node"
-import { Effect, Layer, Option } from "effect"
+import { Config, Effect, Layer, Option } from "effect"
 import { ingest, loadConfig } from "./ingest"
 
 const report = (error: { readonly _tag: string; readonly message: string }) =>
@@ -9,32 +9,33 @@ const report = (error: { readonly _tag: string; readonly message: string }) =>
     console.error(`${error._tag}: ${error.message}`)
   })
 
+const optional = (name: string) => Options.optional(Options.text(name)).pipe(Options.map(Option.getOrUndefined))
+
 const ingestCommand = Command.make(
   "ingest",
   {
-    type: Options.text("type"),
-    text: Options.text("text"),
+    as: Options.text("as").pipe(Options.withFallbackConfig(Config.string("HERODOTUS_AS"))),
+    kind: Options.text("kind"),
+    text: optional("text"),
+    url: optional("url"),
+    title: optional("title"),
+    author: optional("author"),
+    site: optional("site"),
+    publishedAt: optional("published-at"),
+    about: optional("about"),
     tag: Options.repeated(Options.text("tag")),
-    url: Options.optional(Options.text("url")),
-    source: Options.withDefault(Options.text("source"), "cli"),
   },
-  (flags) =>
+  ({ as, tag, ...flags }) =>
     Effect.gen(function* () {
-      const config = yield* loadConfig
-      yield* ingest(config, {
-        type: flags.type,
-        text: flags.text,
-        tags: flags.tag,
-        source: flags.source,
-        ...(Option.isSome(flags.url) ? { url: flags.url.value } : {}),
-      })
+      const config = yield* loadConfig(as, undefined, process.env.HERODOTUS_URL)
+      yield* ingest(config, { ...flags, tags: tag })
     }).pipe(Effect.tapError(report)),
 )
 
-const root = Command.make("private-life").pipe(Command.withSubcommands([ingestCommand]))
+const root = Command.make("herodotus").pipe(Command.withSubcommands([ingestCommand]))
 
 const run = Command.run(root, {
-  name: "Private life",
+  name: "Herodotus",
   version: "0.1.0",
 })
 

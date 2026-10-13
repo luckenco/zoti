@@ -1,8 +1,8 @@
-import { ClickHouseInsertFailed, Misconfigured } from "@private-life/schema"
+import { ClickHouseInsertFailed, Misconfigured } from "@herodotus/schema"
 import { HttpBody, HttpClient } from "@effect/platform"
 import { Context, Effect, Layer } from "effect"
 
-export const itemsTable = "private_life.items"
+export const recordsTable = "herodotus.records"
 
 export interface ClickHouseConfig {
   readonly url: string
@@ -13,30 +13,24 @@ export interface ClickHouseConfig {
 
 export interface SettledRow {
   readonly id: string
+  readonly kind: string
+  readonly via: string
+  readonly actor: string
+  readonly agent: string | null
   readonly url: string | null
+  readonly title: string | null
+  readonly author: string | null
+  readonly site: string | null
+  readonly published_at: string | null
+  readonly about_id: string | null
   readonly text: string
-  readonly type: string
-  readonly source: string
   readonly tags: ReadonlyArray<string>
   readonly ts: string
   readonly raw: string
 }
 
-export const jsonEachRow = (rows: ReadonlyArray<SettledRow>): string => {
-  const lines = rows.map((row) =>
-    JSON.stringify({
-      id: row.id,
-      url: row.url,
-      text: row.text,
-      type: row.type,
-      source: row.source,
-      tags: row.tags,
-      ts: row.ts,
-      raw: row.raw,
-    }),
-  )
-  return `INSERT INTO ${itemsTable} FORMAT JSONEachRow\n${lines.join("\n")}\n`
-}
+export const jsonEachRow = (rows: ReadonlyArray<SettledRow>): string =>
+  `INSERT INTO ${recordsTable} FORMAT JSONEachRow\n${rows.map((row) => JSON.stringify(row)).join("\n")}\n`
 
 const setting = (name: string, value: string): Effect.Effect<string, Misconfigured> =>
   value.length === 0

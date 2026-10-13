@@ -1,4 +1,4 @@
-import { Misconfigured, RateLimited } from "@private-life/schema"
+import { Misconfigured, RateLimited } from "@herodotus/schema"
 import { Context, Effect, Layer } from "effect"
 
 export interface RateLimitBinding {

@@ -1,7 +1,10 @@
 import { HttpBody, HttpClient } from "@effect/platform"
-import { IngestRequest, IngestResponse, ItemId } from "@private-life/schema"
-import { Config, Data, DateTime, Effect, Schema } from "effect"
+import { IngestRequest, IngestResponse, RecordId } from "@herodotus/schema"
+import { Data, DateTime, Effect, Schema } from "effect"
 import { TreeFormatter } from "effect/ParseResult"
+import { readFileSync, statSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
 
 export class CliConfigError extends Data.TaggedError("CliConfigError")<{
   readonly message: string
@@ -22,33 +25,51 @@ export interface ClientConfig {
 }
 
 export interface CaptureInput {
-  readonly type: string
-  readonly text: string
+  readonly kind: string
   readonly tags: ReadonlyArray<string>
-  readonly source: string
-  readonly url?: string
+  readonly text?: string | undefined
+  readonly url?: string | undefined
+  readonly title?: string | undefined
+  readonly author?: string | undefined
+  readonly site?: string | undefined
+  readonly publishedAt?: string | undefined
+  readonly about?: string | undefined
 }
 
-export const loadConfig: Effect.Effect<{ readonly url: string; readonly token: string }, CliConfigError> =
+const ConfigFile = Schema.Struct({
+  url: Schema.String,
+  tokens: Schema.Record({ key: Schema.String, value: Schema.String }),
+})
+
+export const configPath = join(homedir(), ".config", "herodotus", "config.json")
+
+// The token is chosen by identity, so the Worker stamps who is calling.
+export const loadConfig = (
+  identity: string,
+  path = configPath,
+  urlOverride?: string,
+): Effect.Effect<ClientConfig, CliConfigError> =>
   Effect.gen(function* () {
-    const url = yield* Config.string("PRIVATE_LIFE_URL")
-    const token = yield* Config.string("PRIVATE_LIFE_TOKEN")
-    if (url.length === 0 || token.length === 0) {
-      return yield* new CliConfigError({ message: "PRIVATE_LIFE_URL and PRIVATE_LIFE_TOKEN are required" })
-    }
+    const fail = (message: string) => new CliConfigError({ message })
+    const mode = yield* Effect.try({ try: () => statSync(path).mode, catch: () => fail(`cannot read ${path}`) })
+    if ((mode & 0o077) !== 0) return yield* fail(`${path} must not be readable by others (chmod 600)`)
+    const text = yield* Effect.try({ try: () => readFileSync(path, "utf8"), catch: () => fail(`cannot read ${path}`) })
+    const json = yield* Effect.try({ try: (): unknown => JSON.parse(text), catch: () => fail(`${path} is not JSON`) })
+    const file = yield* Schema.decodeUnknown(ConfigFile)(json).pipe(
+      Effect.mapError(() => fail(`${path} must be {"url": "...", "tokens": {"<identity>": "<token>"}}`)),
+    )
+    if (!Object.hasOwn(file.tokens, identity)) return yield* fail(`no token for identity "${identity}" in ${path}`)
+    const token = file.tokens[identity]
+    if (token === undefined || token.length === 0) return yield* fail(`no token for identity "${identity}" in ${path}`)
+    const url = urlOverride ?? file.url
+    if (url.length === 0) return yield* fail("url is empty")
     return { url, token }
-  }).pipe(
-    Effect.mapError((error) =>
-      error._tag === "CliConfigError"
-        ? error
-        : new CliConfigError({ message: "PRIVATE_LIFE_URL and PRIVATE_LIFE_TOKEN are required" }),
-    ),
-  )
+  })
 
 const endpoint = (base: string): Effect.Effect<URL, CliConfigError> =>
   Effect.try({
-    try: () => new URL("/v1/items", base.endsWith("/") ? base : `${base}/`),
-    catch: () => new CliConfigError({ message: "PRIVATE_LIFE_URL is not a URL" }),
+    try: () => new URL("/v1/records", base.endsWith("/") ? base : `${base}/`),
+    catch: () => new CliConfigError({ message: "url is not a URL" }),
   })
 
 export const ingest = (
@@ -56,43 +77,33 @@ export const ingest = (
   input: CaptureInput,
 ): Effect.Effect<ReadonlyArray<string>, CaptureRejected | CliConfigError | IngestFailed, HttpClient.HttpClient> =>
   Effect.gen(function* () {
-    const id = yield* Schema.decodeUnknown(ItemId)(crypto.randomUUID()).pipe(
+    const id = yield* Schema.decodeUnknown(RecordId)(crypto.randomUUID()).pipe(
       Effect.mapError(() => new CaptureRejected({ message: "uuid generator failed" })),
     )
-    const ts = DateTime.formatIso(yield* DateTime.now)
     const url = yield* endpoint(config.url)
-    const decoded = yield* Schema.decodeUnknown(IngestRequest)({
-      schemaVersion: 1,
-      items: [
-        {
-          id,
-          text: input.text,
-          type: input.type,
-          source: input.source,
-          tags: [...input.tags],
-          ts,
-          ...(input.url === undefined ? {} : { url: input.url }),
-        },
-      ],
-    }).pipe(
-      Effect.mapError((error) => new CaptureRejected({ message: TreeFormatter.formatErrorSync(error) })),
-    )
-    const item = decoded.items[0]
-    if (item === undefined) return yield* new CaptureRejected({ message: "capture produced no item" })
+    // JSON.stringify drops the undefined fields, so omitted flags are not sent.
     const wire = {
       schemaVersion: 1,
-      items: [
+      records: [
         {
-          id: item.id,
-          text: item.text,
-          type: item.type,
-          source: item.source,
-          tags: item.tags,
-          ts: DateTime.formatIso(item.ts),
-          ...(item.url === undefined ? {} : { url: item.url }),
+          id,
+          kind: input.kind,
+          via: "cli",
+          url: input.url,
+          title: input.title,
+          author: input.author,
+          site: input.site,
+          publishedAt: input.publishedAt,
+          aboutId: input.about,
+          text: input.text,
+          tags: input.tags,
+          ts: DateTime.formatIso(yield* DateTime.now),
         },
       ],
     }
+    yield* Schema.decodeUnknown(IngestRequest)(wire).pipe(
+      Effect.mapError((error) => new CaptureRejected({ message: TreeFormatter.formatErrorSync(error) })),
+    )
     const http = yield* HttpClient.HttpClient
     const response = yield* http
       .post(url, {

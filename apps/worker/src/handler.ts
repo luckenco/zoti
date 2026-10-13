@@ -1,11 +1,11 @@
 import {
   type ApiFailure,
   IngestRequest,
-  ItemId,
+  RecordId,
   VersionProbe,
   apiFailureBody,
   maxBodyBytes,
-  maxItems,
+  maxRecords,
   statusForFailure,
   InvalidBody,
   Misconfigured,
@@ -13,7 +13,7 @@ import {
   PayloadTooLarge,
   Unauthorized,
   UnsupportedSchemaVersion,
-} from "@private-life/schema"
+} from "@herodotus/schema"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { TreeFormatter } from "effect/ParseResult"
 import { Auth } from "./auth"
@@ -100,7 +100,7 @@ const readLimited = (request: Request): Effect.Effect<string, PayloadTooLarge | 
 const settleId = Effect.gen(function* () {
   const ids = yield* IdSource
   const raw = yield* ids.next
-  return yield* Schema.decodeUnknown(ItemId)(raw).pipe(
+  return yield* Schema.decodeUnknown(RecordId)(raw).pipe(
     Effect.mapError(() => new Misconfigured({ message: "id generator returned a non-uuid" })),
   )
 })
@@ -116,43 +116,53 @@ const ingest = (request: Request) =>
       yield* limiter.consume("anonymous")
       return yield* new Unauthorized()
     }
-    yield* limiter.consume(identified.right)
+    const identity = identified.right
+    yield* limiter.consume(identity.name)
 
     const text = yield* readLimited(request)
     const json = yield* Effect.try({
       try: (): unknown => JSON.parse(text),
       catch: () => new InvalidBody({ message: "body is not JSON" }),
     })
-    if (isRecord(json) && Array.isArray(json.items) && json.items.length > maxItems) {
-      return yield* new InvalidBody({ message: "at most 100 items" })
+    const originals = isRecord(json) && Array.isArray(json.records) ? json.records : []
+    if (isRecord(json) && Array.isArray(json.records) && originals.length > maxRecords) {
+      return yield* new InvalidBody({ message: `at most ${maxRecords} records` })
     }
-    if (isRecord(json) && Array.isArray(json.items) && json.items.length === 0) {
-      return yield* new InvalidBody({ message: "at least 1 item" })
+    if (isRecord(json) && Array.isArray(json.records) && originals.length === 0) {
+      return yield* new InvalidBody({ message: "at least 1 record" })
     }
     const probed = yield* Schema.decodeUnknown(VersionProbe)(json).pipe(Effect.either)
     if (probed._tag === "Right" && probed.right.schemaVersion !== 1) {
       return yield* new UnsupportedSchemaVersion({ schemaVersion: probed.right.schemaVersion })
     }
+    if (originals.some((original) => isRecord(original) && ("actor" in original || "agent" in original))) {
+      return yield* new InvalidBody({ message: "actor and agent are set by the server" })
+    }
     const decoded = yield* Schema.decodeUnknown(IngestRequest)(json).pipe(
       Effect.mapError((error) => new InvalidBody({ message: TreeFormatter.formatErrorSync(error) })),
     )
-    const originals = isRecord(json) && Array.isArray(json.items) ? json.items : []
     const rows: Array<SettledRow> = []
-    for (let index = 0; index < decoded.items.length; index++) {
-      const item = decoded.items[index]
-      if (item === undefined) return yield* Effect.die("decoded item missing")
-      const id = item.id ?? (yield* settleId)
+    for (let index = 0; index < decoded.records.length; index++) {
+      const record = decoded.records[index]
+      if (record === undefined) return yield* Effect.die("decoded record missing")
+      const id = record.id ?? (yield* settleId)
       const original = originals[index]
-      const raw = JSON.stringify(isRecord(original) ? { ...original, id } : { id })
       rows.push({
         id,
-        url: item.url ?? null,
-        text: item.text,
-        type: item.type,
-        source: item.source,
-        tags: item.tags,
-        ts: DateTime.formatIso(item.ts),
-        raw,
+        kind: record.kind,
+        via: record.via,
+        actor: identity.actor,
+        agent: identity.actor === "agent" ? identity.name : null,
+        url: record.url ?? null,
+        title: record.title ?? null,
+        author: record.author ?? null,
+        site: record.site ?? null,
+        published_at: record.publishedAt ? DateTime.formatIso(record.publishedAt) : null,
+        about_id: record.aboutId ?? null,
+        text: record.text ?? "",
+        tags: record.tags,
+        ts: DateTime.formatIso(record.ts),
+        raw: JSON.stringify(isRecord(original) ? { ...original, id } : { id }),
       })
     }
     const clickhouse = yield* ClickHouse
@@ -167,13 +177,13 @@ const ingest = (request: Request) =>
 const route = (request: Request) =>
   Effect.gen(function* () {
     const path = new URL(request.url).pathname
-    if (request.method === "OPTIONS" && (path === "/v1/items" || path === "/health")) {
+    if (request.method === "OPTIONS" && (path === "/v1/records" || path === "/health")) {
       return new Response(null, { status: 204, headers: corsHeaders })
     }
     if (request.method === "GET" && path === "/health") {
       return jsonResponse(200, { ok: true })
     }
-    if (request.method === "POST" && path === "/v1/items") {
+    if (request.method === "POST" && path === "/v1/records") {
       return yield* ingest(request)
     }
     return yield* new NotFound()

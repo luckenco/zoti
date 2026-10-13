@@ -1,32 +1,39 @@
-import { Misconfigured, Unauthorized } from "@private-life/schema"
+import { type Actor, Misconfigured, Unauthorized } from "@herodotus/schema"
 import { Context, Effect, Layer } from "effect"
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-export const parseAuthTokens = (
-  raw: string,
-): Effect.Effect<ReadonlyArray<readonly [string, string]>, Misconfigured> =>
+export interface Identity {
+  readonly name: string
+  readonly actor: Actor
+}
+
+interface TokenEntry extends Identity {
+  readonly token: string
+}
+
+const bad = (message: string) => Effect.fail(new Misconfigured({ message }))
+
+export const parseAuthTokens = (raw: string): Effect.Effect<ReadonlyArray<TokenEntry>, Misconfigured> =>
   Effect.try({
     try: (): unknown => JSON.parse(raw),
     catch: () => new Misconfigured({ message: "AUTH_TOKENS is not JSON" }),
   }).pipe(
     Effect.flatMap((value) => {
-      if (!isRecord(value)) {
-        return Effect.fail(new Misconfigured({ message: "AUTH_TOKENS must be an object" }))
+      if (!isRecord(value)) return bad("AUTH_TOKENS must be an object")
+      const entries: Array<TokenEntry> = []
+      const seen = new Set<string>()
+      for (const [name, entry] of Object.entries(value)) {
+        if (name.length === 0 || !isRecord(entry)) return bad("AUTH_TOKENS entries must be objects")
+        const { token, actor } = entry
+        if (typeof token !== "string" || token.length === 0) return bad("AUTH_TOKENS token must be a non-empty string")
+        if (actor !== "human" && actor !== "agent") return bad("AUTH_TOKENS actor must be human or agent")
+        if (seen.has(token)) return bad("AUTH_TOKENS tokens must be unique")
+        seen.add(token)
+        entries.push({ name, token, actor })
       }
-      const entries: Array<readonly [string, string]> = []
-      for (const [name, token] of Object.entries(value)) {
-        if (name.length === 0 || typeof token !== "string" || token.length === 0) {
-          return Effect.fail(
-            new Misconfigured({ message: "AUTH_TOKENS values must be non-empty strings" }),
-          )
-        }
-        entries.push([name, token])
-      }
-      if (entries.length === 0) {
-        return Effect.fail(new Misconfigured({ message: "AUTH_TOKENS is empty" }))
-      }
+      if (entries.length === 0) return bad("AUTH_TOKENS is empty")
       return Effect.succeed(entries)
     }),
   )
@@ -57,7 +64,7 @@ const bearerToken = (header: string | null): string | null => {
 export class Auth extends Context.Tag("Auth")<
   Auth,
   {
-    readonly identify: (header: string | null) => Effect.Effect<string, Unauthorized | Misconfigured>
+    readonly identify: (header: string | null) => Effect.Effect<Identity, Unauthorized | Misconfigured>
   }
 >() {}
 
@@ -71,13 +78,13 @@ export const authLayer = (raw: string): Layer.Layer<Auth> =>
           const presented = bearerToken(header)
           if (presented === null) return yield* new Unauthorized()
           const presentedDigest = yield* sha256(presented)
-          let client: string | null = null
-          for (const [name, token] of tokens) {
-            const digest = yield* sha256(token)
-            if (digestsEqual(presentedDigest, digest)) client = name
+          let found: Identity | null = null
+          for (const entry of tokens) {
+            const digest = yield* sha256(entry.token)
+            if (digestsEqual(presentedDigest, digest)) found = { name: entry.name, actor: entry.actor }
           }
-          if (client === null) return yield* new Unauthorized()
-          return client
+          if (found === null) return yield* new Unauthorized()
+          return found
         }),
     }),
   )

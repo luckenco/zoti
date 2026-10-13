@@ -1,4 +1,4 @@
-# Private-life ETL plan
+# Herodotus ETL plan
 
 Capture pages, selections, notes, and bookmarks into one ClickHouse table. A Cloudflare Worker is the only writer. A Chrome extension and a CLI are the first clients. Nothing in this repository is deployed, and no real credential is committed.
 
@@ -8,8 +8,8 @@ All of the following are true on a clean checkout.
 
 1. `bun run typecheck` exits 0.
 2. `bun run test` exits 0. The suite includes the cases in [Tests](#tests).
-3. `clickhouse/migrations/001_items.sql` creates `items` with the columns below, `ReplacingMergeTree`, an `ORDER BY` that ends in `id`, and a `PARTITION BY`.
-4. `apps/worker`, `apps/cli`, and `apps/extension` import the item schema from `packages/schema`. They do not declare a second copy.
+3. `clickhouse/migrations/001_records.sql` creates `records` with the columns below, `ReplacingMergeTree`, an `ORDER BY` that ends in `id`, and a `PARTITION BY`.
+4. `apps/worker`, `apps/cli`, and `apps/extension` import the record schema from `packages/schema`. They do not declare a second copy.
 5. `infra/alchemy.run.ts` declares the Worker, its secrets, and a rate-limit binding. Running it is Cal's job.
 6. A search of the tracked tree finds no bearer token, ClickHouse password, or `.dev.vars` file.
 
@@ -17,7 +17,7 @@ All of the following are true on a clean checkout.
 
 In this scaffold:
 
-- `packages/schema`, the versioned item contract and the error contract.
+- `packages/schema`, the versioned record contract and the error contract.
 - `clickhouse/migrations` and a grants file for an insert-only user.
 - `apps/worker`, the proxy.
 - `apps/cli`, one command that posts the same contract.
@@ -33,24 +33,39 @@ Out of this scaffold:
 
 ## Data
 
-One row is one captured item. `id` is the identity. A later insert with the same `id` and a `ts` in the same month replaces the earlier row. The version column is `ingested_at`.
+One row is one **record**: a note you wrote, or a source you saved (video, tweet, blog post, page, selection). `id` is the identity. A later insert with the same `id` and a `ts` in the same month replaces the earlier row. The version column is `ingested_at`.
 
-Clients generate `id` with `crypto.randomUUID()` before the first POST. A retry sends that same `id` and the same `ts`. The Worker generates an id only when the client omits one, and then the client cannot retry safely, because it never learned the id if the insert failed.
+Three independent fields describe where a record came from:
 
-`raw` is the JSON text of the item the client sent, plus the id the Worker settled on. Later columns can be added without a new client.
+- `kind` is what it is: `note`, `video`, `tweet`, `post`, `page`, `selection`. A free string, so a new kind needs no migration.
+- `via` is the client that sent it: `chrome`, `cli`. A free string the client declares. It carries no trust.
+- `actor` is who made it: `human` or `agent`. `agent` is the agent's name, set only when `actor` is `agent`. Both are stamped by the Worker from the bearer token. A client cannot set them, and a body that includes either is rejected.
+
+A note about a source is its own `kind=note` record with `about_id` set to the source's `id`. A standalone note leaves `about_id` empty. A record needs `text` or `url`.
+
+Clients generate `id` with `crypto.randomUUID()` before the first POST. A retry sends that same `id` and the same `ts`. The Worker generates an id only when the client omits one, and then the client cannot retry safely, because it never learned the id if the insert failed. Ids exist for safe retries only. There are no edits. Any token that reuses an id can replace a row, because the insert-only user cannot read to check. That is a known limitation. There is no dedupe by `url`: each capture is its own row.
+
+`raw` is the JSON text of the record the client sent, plus the id the Worker settled on. It excludes the stamped `actor` and `agent`, which have their own columns. Later columns can be added without a new client.
 
 ### Table
 
 ```sql
-CREATE DATABASE IF NOT EXISTS private_life;
+CREATE DATABASE IF NOT EXISTS herodotus;
 
-CREATE TABLE IF NOT EXISTS private_life.items
+CREATE TABLE IF NOT EXISTS herodotus.records
 (
     id UUID,
+    kind LowCardinality(String),
+    via LowCardinality(String),
+    actor LowCardinality(String),
+    agent Nullable(String),
     url Nullable(String),
-    text String,
-    type LowCardinality(String),
-    source LowCardinality(String),
+    title Nullable(String),
+    author Nullable(String),
+    site Nullable(String),
+    published_at Nullable(DateTime64(3, 'UTC')),
+    about_id Nullable(UUID),
+    text String DEFAULT '',
     tags Array(String),
     ts DateTime64(3, 'UTC'),
     ingested_at DateTime64(3, 'UTC') DEFAULT now64(3),
@@ -62,7 +77,7 @@ ORDER BY (id)
 SETTINGS index_granularity = 8192;
 ```
 
-`ingested_at` is `DateTime64(3, 'UTC')`. The brief wrote `DateTime64(3)` with no time zone. Both columns are UTC so a comparison does not mix server-local and UTC values. `now64(3)` matches the precision. `raw` defaults to empty so a manual insert still parses. The Worker always writes `raw`.
+Both timestamp columns are UTC so a comparison does not mix server-local and UTC values. `now64(3)` matches the precision. `raw` defaults to empty so a manual insert still parses. The Worker always writes `raw`. `ts` is the capture time. `published_at` is when the source was published.
 
 `ReplacingMergeTree` deduplicates inside one partition, and only after a merge. Two consequences:
 
@@ -76,14 +91,14 @@ SETTINGS index_granularity = 8192;
 `clickhouse/grants.sql` contains the grant and comments for creating the user in the ClickHouse Cloud console. It contains no password.
 
 ```sql
-GRANT INSERT ON private_life.items TO ingest;
+GRANT INSERT ON herodotus.records TO ingest;
 ```
 
 The Worker connects as `ingest`. That user cannot `SELECT` or `ALTER`.
 
 ## HTTP contract
 
-`POST /v1/items`
+`POST /v1/records`
 
 Header `Authorization: Bearer <token>`.
 
@@ -92,13 +107,18 @@ Body, schema version 1:
 ```json
 {
   "schemaVersion": 1,
-  "items": [
+  "records": [
     {
       "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
-      "url": "https://example.com/post",
-      "text": "the selected passage",
-      "type": "selection",
-      "source": "chrome",
+      "kind": "video",
+      "via": "chrome",
+      "url": "https://www.youtube.com/watch?v=abc",
+      "title": "A talk",
+      "author": "A channel",
+      "site": "youtube.com",
+      "publishedAt": "2026-10-01T00:00:00.000Z",
+      "aboutId": null,
+      "text": "",
       "tags": ["reading"],
       "ts": "2026-10-13T10:52:00.000Z"
     }
@@ -106,14 +126,14 @@ Body, schema version 1:
 }
 ```
 
-`id` may be omitted. `url` may be `null` or omitted, and both become SQL `NULL`. `text` is required and non-empty. `type` and `source` are non-empty strings up to 64 characters, not a closed enum, so a new capture kind does not need a migration. The extension sends `source` `chrome` and `type` `page` or `selection`. The CLI sends `source` `cli` unless `--source` is set.
+Required: `kind`, `via`, `tags`, `ts`. Optional: `id`, `url`, `title`, `author`, `site`, `publishedAt`, `aboutId`, `text`. Omitted or `null` nullable fields become SQL `NULL`. Omitted `text` becomes `''`. A record with empty `text` and no `url` is rejected. `kind` and `via` are non-empty strings up to 64 characters, not closed enums. `actor` and `agent` are not accepted in the body.
 
 Limits, enforced by the schema or the Worker before the insert:
 
-- At most 100 items per request.
+- At most 100 records per request.
 - `text` at most 100_000 characters.
 - At most 32 tags, each at most 64 characters.
-- `url` at most 2048 characters.
+- `url` at most 2048 characters. `title`, `author`, and `site` at most 512.
 - Request body at most 1 MiB. Larger bodies return 413 and are not parsed.
 
 Success is HTTP 201.
@@ -134,15 +154,15 @@ Errors are `Data.TaggedError` values encoded as JSON. The schema package owns th
 
 | Status | `_tag` | When |
 | --- | --- | --- |
-| 400 | `InvalidBody` | JSON is not the version 1 request. `message` is the schema error. |
+| 400 | `InvalidBody` | JSON is not the version 1 request, a record has neither `text` nor `url`, or a record sets `actor` or `agent`. `message` is the schema error. |
 | 400 | `UnsupportedSchemaVersion` | `schemaVersion` is a number other than 1. |
 | 401 | `Unauthorized` | Missing or unknown bearer token. |
 | 413 | `PayloadTooLarge` | Body over 1 MiB. |
 | 429 | `RateLimited` | Rate-limit binding returns `success: false`. `Retry-After: 60`. |
 | 502 | `ClickHouseInsertFailed` | ClickHouse responds non-2xx. Body is the fixed string `ClickHouse insert failed` plus the HTTP status. The ClickHouse response body is logged, not returned. |
-| 500 | `Misconfigured` | `AUTH_TOKENS` is not a JSON object of strings, or a ClickHouse setting is empty. |
+| 500 | `Misconfigured` | `AUTH_TOKENS` is not valid, or a ClickHouse setting is empty. |
 
-Auth runs before schema validation of the items, after the body size check. An unauthenticated caller does not get a free schema oracle beyond the size cap. Version probing still happens only after auth, so an unknown token always gets 401.
+Auth runs before schema validation of the records, after the body size check. An unauthenticated caller does not get a free schema oracle beyond the size cap. Version probing still happens only after auth, so an unknown token always gets 401.
 
 ## Worker path
 
@@ -157,7 +177,7 @@ fetch
 
 `handler.ts` is the program tests call. It returns `Effect<Response, never>`. Tagged errors become the JSON body inside that program. Tests assert status and body, and they assert the exact JSONEachRow text the ClickHouse layer received.
 
-Auth secret `AUTH_TOKENS` is a JSON object from client name to token, for example `{"chrome":"...","cli":"..."}`. The Worker hashes the presented bearer token and each stored token with SHA-256, then compares digests with `crypto.subtle.timingSafeEqual`. It checks every configured token. The rate-limit key is the client name, never the token.
+Auth secret `AUTH_TOKENS` is a JSON object from identity name to `{token, actor}`, for example `{"chrome":{"token":"...","actor":"human"},"pi":{"token":"...","actor":"agent"}}`. `actor` is `human` or `agent`. Anything else, or a missing field, is `Misconfigured`. One identity has one token, so a client that can be human or agent gets one identity of each. The Worker hashes the presented bearer token and each stored token with SHA-256, then compares digests with `crypto.subtle.timingSafeEqual`. It checks every configured token. It stamps `actor` on each record from the matching entry, and stamps `agent` with the identity name when `actor` is `agent`, otherwise `NULL`. The rate-limit key is the identity name, never the token.
 
 The rate-limit binding is `INGEST_RATE_LIMITER`, namespace id `1001`, 60 calls per 60 seconds. One HTTP request counts as one call, including a batch. The binding is per Cloudflare location and has had production reports of counters that fail open. The README tells Cal to send a burst after deploy and confirm a 429. Tests use a fake binding, so they do not claim the live counter works.
 
@@ -168,8 +188,8 @@ POST {CLICKHOUSE_URL}/?database={CLICKHOUSE_DATABASE}&date_time_input_format=bes
 X-ClickHouse-User: {CLICKHOUSE_USER}
 X-ClickHouse-Key: {CLICKHOUSE_PASSWORD}
 
-INSERT INTO private_life.items FORMAT JSONEachRow
-{"id":"...","url":null,"text":"...","type":"...","source":"...","tags":["..."],"ts":"...","raw":"..."}
+INSERT INTO herodotus.records FORMAT JSONEachRow
+{"id":"...","kind":"...","via":"...","actor":"...","agent":null,"url":null,"title":null,"author":null,"site":null,"published_at":null,"about_id":null,"text":"...","tags":["..."],"ts":"...","raw":"..."}
 ```
 
 Each data line is `JSON.stringify` of one row object. String fields are escaped by that call, not by hand. `ingested_at` is omitted so the column default runs. The table name is qualified so a wrong `database` parameter cannot write somewhere else. `date_time_input_format=best_effort` accepts the ISO-8601 timestamp the schema encodes. Headers are `X-ClickHouse-User` and `X-ClickHouse-Key`. The password is not placed in the URL.
@@ -187,12 +207,12 @@ Compatibility date is `2026-10-13`. The `nodejs_compat` flag is on. Observabilit
 The CLI is an Effect program using `@effect/platform` and `@effect/cli`.
 
 ```
-private-life ingest --type note --text "ship the schema" --tag etl
+herodotus ingest --as pi --kind note --text "ship the schema" --tag etl
 ```
 
-It reads `PRIVATE_LIFE_URL` and `PRIVATE_LIFE_TOKEN`, generates an id, posts schema version 1, and prints the returned ids. `--url`, `--source`, and repeated `--tag` are optional. `--source` defaults to `cli`.
+`--as <identity>` (or `HERODOTUS_AS`) is required and has no default, because a CLI call can come from you or from an agent. The CLI errors if it is missing. It looks the identity up in `~/.config/herodotus/config.json`, which holds the Worker URL and a token per identity and must be mode `0600`. `HERODOTUS_URL` overrides the URL. The CLI never sends `actor` or `agent`: the Worker stamps them from the token. It generates an id, posts schema version 1 with `via` `cli`, and prints the returned ids. `--kind` is required. `--url`, `--title`, `--author`, `--site`, `--published-at`, `--about <id>`, `--text`, and repeated `--tag` are optional. Agents use this CLI only. There is no MCP server in this scope.
 
-The extension is Manifest V3. The popup reads the active tab URL and title, and the current selection via `chrome.scripting.executeScript`. Saving posts `type` `page` or `selection` and `source` `chrome`. The options page stores the Worker URL and bearer token in `chrome.storage.local`. `esbuild` bundles the popup so it can import `packages/schema`. Host permission is `https://*/*` plus localhost, because the Worker hostname is not known until Cal deploys. The README says to narrow that to the Worker origin afterwards. `activeTab` and `scripting` cover reading the current page.
+The extension is Manifest V3. The popup reads the active tab URL and title, the current selection via `chrome.scripting.executeScript`, and the page's `<meta>` tags (`og:title`, `author`, `article:published_time`). It sets `site` from the hostname and infers `kind`: `youtube.com` or `youtu.be` is `video`, `x.com` or `twitter.com` is `tweet`, a non-empty selection is `selection`, anything else is `page`. It sends `via` `chrome`. Per-site scraping of channels or handles is out. The options page stores the Worker URL and the `chrome` identity's token in `chrome.storage.local`. `esbuild` bundles the popup so it can import `packages/schema`. Host permission is `https://*/*` plus localhost, because the Worker hostname is not known until Cal deploys. The README says to narrow that to the Worker origin afterwards. `activeTab` and `scripting` cover reading the current page.
 
 ## Alchemy
 
@@ -219,7 +239,7 @@ apps/worker
 apps/cli
 apps/extension
 infra
-clickhouse/migrations/001_items.sql
+clickhouse/migrations/001_records.sql
 clickhouse/grants.sql
 ```
 
@@ -231,15 +251,19 @@ Bun workspaces, declared on the root `package.json`. Each package has its own `p
 
 Schema:
 
-- A valid one-item body decodes to the item fields, including the timestamp.
+- A valid one-record body decodes to the record fields, including the timestamp.
 - `schemaVersion: 2` fails version decoding.
-- Empty `text`, 101 items, and a non-UUID `id` fail decoding.
+- Empty `text` with no `url`, 101 records, and a non-UUID `id` fail decoding.
+- A record with `actor` or `agent` in the body is rejected.
+- A source with `url` and empty `text` decodes. A note with `aboutId` decodes.
 
 Worker, through the fetch handler with a fake ClickHouse and a fake rate limiter:
 
 - A valid batch returns 201 and the recorded body is the two JSONEachRow lines, including `raw` and excluding `ingested_at`.
 - The same `id` sent twice is forwarded twice, unchanged.
 - A missing `id` is a UUID in the 201 body and in the inserted row.
+- A human token stamps `actor` `human` and `agent` `null`. An agent token stamps `actor` `agent` and `agent` as its identity name. A body that sets either returns 400.
+- An `AUTH_TOKENS` entry with a bad `actor` returns 500.
 - A wrong bearer token returns 401 and the fake ClickHouse receives no body.
 - The rate limiter returning `success: false` returns 429 and `Retry-After: 60`.
 - A non-2xx ClickHouse response returns 502 whose body does not contain the sentinel planted in the ClickHouse error body.
@@ -247,13 +271,15 @@ Worker, through the fetch handler with a fake ClickHouse and a fake rate limiter
 
 CLI:
 
-- The ingest effect, pointed at a local mock server, posts a body that decodes as schema version 1 and prints the id from the mock's 201.
+- The ingest effect, pointed at a local mock server, posts a body that decodes as schema version 1, sends the token for the `--as` identity, and prints the id from the mock's 201.
+- `loadConfig` returns the token for the identity, lets `HERODOTUS_URL` override the file URL, and fails for an unknown identity or a config file others can read. A missing `--as` is rejected by the option parser before any request, which was run by hand rather than tested.
 
 Extension:
 
-- The pure capture builder returns a body that decodes as schema version 1 with `source` `chrome`.
+- The capture builder infers `kind` from the hostname (`youtube.com` is `video`, `x.com` is `tweet`, a selection is `selection`, otherwise `page`) and reads `<meta>` tags into `title`, `author`, and `publishedAt`.
+- The pure capture builder returns a body that decodes as schema version 1 with `via` `chrome` and no `actor` or `agent`.
 
-ClickHouse, only if a local server or `clickhouse-local` can be installed without credentials. Apply `001_items.sql`, insert one JSONEachRow line, and `SELECT` it back with `FINAL`. If that binary is not available, record the skip in `decisions.tsv` and do not pretend the DDL was executed.
+ClickHouse, only if a local server or `clickhouse-local` can be installed without credentials. Apply `001_records.sql`, insert one JSONEachRow line, and `SELECT` it back with `FINAL`. If that binary is not available, record the skip in `decisions.tsv` and do not pretend the DDL was executed.
 
 ## Order of work
 
@@ -275,6 +301,6 @@ Claude Opus 5.5 was not called. A local subagent launch with model `claude-opus-
 
 Author corrections after that failure, before implementation:
 
-- The insert names `private_life.items` and builds each JSONEachRow line with `JSON.stringify`.
+- The insert names `herodotus.records` and builds each JSONEachRow line with `JSON.stringify`.
 - The README must tell Cal that ClickHouse Cloud cannot use an IP allowlist for this Worker, because Workers have no stable egress range.
 - Application packages pin Effect `3.22.2`. Alchemy `2.0.0-beta.83` peers Effect `^4.0.0`, so `infra/` depends on Effect 4 and does not import the Worker. The Worker stays on Effect 3.

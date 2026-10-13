@@ -1,5 +1,5 @@
 {
-  "name": "@private-life/worker",
+  "name": "@herodotus/worker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@effect/platform": "0.97.2",
-    "@private-life/schema": "workspace:*",
+    "@herodotus/schema": "workspace:*",
     "effect": "3.22.2"
   },
   "devDependencies": {

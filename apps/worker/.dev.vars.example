@@ -1,5 +1,5 @@
-AUTH_TOKENS={"chrome":"replace-me","cli":"replace-me"}
+AUTH_TOKENS={"chrome":{"token":"replace-chrome-token","actor":"human"},"you":{"token":"replace-human-token","actor":"human"},"pi":{"token":"replace-agent-token","actor":"agent"}}
 CLICKHOUSE_URL=https://your-service.region.aws.clickhouse.cloud:8443
 CLICKHOUSE_USER=ingest
 CLICKHOUSE_PASSWORD=replace-me
-CLICKHOUSE_DATABASE=private_life
+CLICKHOUSE_DATABASE=herodotus

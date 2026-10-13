@@ -1,19 +1,19 @@
 {
-  "name": "@private-life/cli",
+  "name": "@herodotus/cli",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "private-life": "./bin/private-life.mjs"
+    "herodotus": "./bin/herodotus.mjs"
   },
   "scripts": {
-    "ingest": "node ./bin/private-life.mjs ingest"
+    "ingest": "node ./bin/herodotus.mjs ingest"
   },
   "dependencies": {
     "@effect/cli": "0.77.2",
     "@effect/platform": "0.97.2",
     "@effect/platform-node": "0.108.2",
-    "@private-life/schema": "workspace:*",
+    "@herodotus/schema": "workspace:*",
     "effect": "3.22.2",
     "tsx": "4.23.15"
   },

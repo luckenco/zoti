@@ -10,16 +10,16 @@
       },
     },
     "apps/cli": {
-      "name": "@private-life/cli",
+      "name": "@herodotus/cli",
       "version": "0.1.0",
       "bin": {
-        "private-life": "./bin/private-life.mjs",
+        "herodotus": "./bin/herodotus.mjs",
       },
       "dependencies": {
         "@effect/cli": "0.77.2",
         "@effect/platform": "0.97.2",
         "@effect/platform-node": "0.108.2",
-        "@private-life/schema": "workspace:*",
+        "@herodotus/schema": "workspace:*",
         "effect": "3.22.2",
         "tsx": "4.23.15",
       },
@@ -30,10 +30,10 @@
       },
     },
     "apps/extension": {
-      "name": "@private-life/extension",
+      "name": "@herodotus/extension",
       "version": "0.1.0",
       "dependencies": {
-        "@private-life/schema": "workspace:*",
+        "@herodotus/schema": "workspace:*",
         "effect": "3.22.2",
       },
       "devDependencies": {
@@ -44,11 +44,11 @@
       },
     },
     "apps/worker": {
-      "name": "@private-life/worker",
+      "name": "@herodotus/worker",
       "version": "0.1.0",
       "dependencies": {
         "@effect/platform": "0.97.2",
-        "@private-life/schema": "workspace:*",
+        "@herodotus/schema": "workspace:*",
         "effect": "3.22.2",
       },
       "devDependencies": {
@@ -59,7 +59,7 @@
       },
     },
     "infra": {
-      "name": "@private-life/infra",
+      "name": "@herodotus/infra",
       "version": "0.1.0",
       "dependencies": {
         "@effect/platform-bun": "4.0.4",
@@ -71,7 +71,7 @@
       },
     },
     "packages/schema": {
-      "name": "@private-life/schema",
+      "name": "@herodotus/schema",
       "version": "0.1.0",
       "dependencies": {
         "effect": "3.22.2",
@@ -244,6 +244,16 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.28.2", "", { "os": "win32", "cpu": "ia32" }, "sha512-YmJbfTlvU7Sdn9BB+4PRES4oB6pxgS37MAONj+hBr/cpXS1aBPKXxNnDbu+QCWPj0o9dgyxeq79g6c5P8KeuYA=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.28.2", "", { "os": "win32", "cpu": "x64" }, "sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g=="],
+
+    "@herodotus/cli": ["@herodotus/cli@workspace:apps/cli"],
+
+    "@herodotus/extension": ["@herodotus/extension@workspace:apps/extension"],
+
+    "@herodotus/infra": ["@herodotus/infra@workspace:infra"],
+
+    "@herodotus/schema": ["@herodotus/schema@workspace:packages/schema"],
+
+    "@herodotus/worker": ["@herodotus/worker@workspace:apps/worker"],
 
     "@hono/node-server": ["@hono/node-server@1.19.9", "", { "peerDependencies": { "hono": "^4" } }, "sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw=="],
 
@@ -424,16 +434,6 @@
     "@prisma/get-platform": ["@prisma/get-platform@7.2.0", "", { "dependencies": { "@prisma/debug": "7.2.0" } }, "sha512-k1V0l0Td1732EHpAfi2eySTezyllok9dXb6UQanajkJQzPUGi3vO2z7jdkz67SypFTdmbnyGYxvEvYZdZsMAVA=="],
 
     "@prisma/query-plan-executor": ["@prisma/query-plan-executor@7.2.0", "", {}, "sha512-EOZmNzcV8uJ0mae3DhTsiHgoNCuu1J9mULQpGCh62zN3PxPTd+qI9tJvk5jOst8WHKQNwJWR3b39t0XvfBB0WQ=="],
-
-    "@private-life/cli": ["@private-life/cli@workspace:apps/cli"],
-
-    "@private-life/extension": ["@private-life/extension@workspace:apps/extension"],
-
-    "@private-life/infra": ["@private-life/infra@workspace:infra"],
-
-    "@private-life/schema": ["@private-life/schema@workspace:packages/schema"],
-
-    "@private-life/worker": ["@private-life/worker@workspace:apps/worker"],
 
     "@puppeteer/browsers": ["@puppeteer/browsers@3.2.4", "", { "dependencies": { "modern-tar": "^0.8.5", "yargs": "^18.0.0" }, "peerDependencies": { "proxy-agent": ">=8.0.1", "yauzl": "^2.10.0 || ^3.4.0" }, "optionalPeers": ["proxy-agent", "yauzl"], "bin": { "browsers": "lib/main-cli.js" } }, "sha512-okJ6yQMc0SBexOKxMi966omwAV1uAPwgF/YMZdb04gZQPXVjWHl9bmXjZYtIcsN1+PN3Bz4iFfGK3g+c6lZJ0Q=="],
 
@@ -873,11 +873,11 @@
 
     "@effect/sql-sqlite-do/effect": ["effect@4.0.4", "", {}, "sha512-Sr50OeVSC3M5UkoUYUhFf3EULryhGaZZUf6OzDHTvaznOw7HRlxOKdF3/4nvQXHL22StOyMG3Cvo8Bt7xUp+Ng=="],
 
+    "@herodotus/infra/effect": ["effect@4.0.4", "", {}, "sha512-Sr50OeVSC3M5UkoUYUhFf3EULryhGaZZUf6OzDHTvaznOw7HRlxOKdF3/4nvQXHL22StOyMG3Cvo8Bt7xUp+Ng=="],
+
     "@octokit/plugin-paginate-rest/@octokit/types": ["@octokit/types@16.0.0", "", { "dependencies": { "@octokit/openapi-types": "^27.0.0" } }, "sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg=="],
 
     "@octokit/plugin-rest-endpoint-methods/@octokit/types": ["@octokit/types@16.0.0", "", { "dependencies": { "@octokit/openapi-types": "^27.0.0" } }, "sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg=="],
-
-    "@private-life/infra/effect": ["effect@4.0.4", "", {}, "sha512-Sr50OeVSC3M5UkoUYUhFf3EULryhGaZZUf6OzDHTvaznOw7HRlxOKdF3/4nvQXHL22StOyMG3Cvo8Bt7xUp+Ng=="],
 
     "@vitest/snapshot/@vitest/pretty-format": ["@vitest/pretty-format@3.2.6", "", { "dependencies": { "tinyrainbow": "^2.0.0" } }, "sha512-lb7XXXzmm2h2ASzFnRvQpDo6onT1NmMJA3tkGTWiBFtRJ9lxGY3d3mm/Apt36gej2bkkOVLL/yTOtufDaFa/jA=="],
 
