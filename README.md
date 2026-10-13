@@ -1,110 +1,78 @@
 # Herodotus
 
-Capture notes and sources (videos, tweets, posts, pages, selections) into one ClickHouse table, marked as made by you or by an agent. A Cloudflare Worker is the only process that inserts. A Chrome extension and a command-line client send the same schema. Agents use the CLI.
+Save notes and sources—videos, tweets, posts, pages, selections—with human or agent attribution. A Cloudflare Worker accepts captures from the CLI and Chrome extension and inserts them into ClickHouse. There is no read API yet.
 
-Nothing in this repository is deployed. No real credential belongs in git.
-
-## Layout
-
-```
-packages/schema          versioned record contract and error bodies
-apps/worker              ingress Worker
-apps/cli                 herodotus ingest
-apps/extension           Manifest V3 popup
-infra/alchemy.run.ts     Worker, secrets, and rate-limit binding
-clickhouse/migrations    records table
-clickhouse/grants.sql    INSERT grant for user ingest
-```
-
-## Checks
+## Development
 
 ```sh
-bun install
+bun install --frozen-lockfile
 bun run typecheck
 bun run test
 bun run extension:build
 ```
 
-## ClickHouse Cloud
+- `packages/schema`: request/response contract
+- `apps/worker`: authentication, validation, ingestion
+- `apps/cli`, `apps/extension`: capture clients
+- `infra/alchemy.run.ts`: Cloudflare deployment
+- `clickhouse`: schema and grants
 
-1. Create a service on the [ClickHouse Cloud](https://clickhouse.cloud) free tier.
-2. Leave the IP allowlist empty. Cloudflare Workers have no stable egress range, so an allowlist blocks every insert. The `ingest` password is the control.
-3. Run `clickhouse/migrations/001_records.sql` in the SQL console.
-4. Create a user named `ingest` in the console and set its password there. `clickhouse/grants.sql` has no password.
-5. Run `clickhouse/grants.sql`. That user can `INSERT` into `herodotus.records` and cannot `SELECT`.
+## Database and secrets
 
-`ReplacingMergeTree` keeps the newest `ingested_at` for one `id` inside one month, and only after a merge. The same `id` with `ts` in another month stays as two rows. A later read should use `SELECT ... FINAL`. This scaffold has no read API.
+Create a [ClickHouse Cloud](https://clickhouse.cloud) service and check its pricing. This setup needs **Allow from anywhere** because the Worker has no fixed egress IP; use strong credentials and monitor costs.
 
-## Secrets
+Run `clickhouse/migrations/001_records.sql`, create the database user `ingest`, then run `clickhouse/grants.sql`. Give that user only INSERT on `herodotus.records`, with no broader roles. Never give the Worker administrative credentials.
 
-Copy `apps/worker/.dev.vars.example` to `apps/worker/.dev.vars` for local `wrangler dev`. `.dev.vars` is gitignored.
+For deployment, put these in gitignored `infra/.env` (mode `0600`):
 
-| Name | Value |
-| --- | --- |
-| `AUTH_TOKENS` | JSON object from identity name to `{"token": "...", "actor": "human" \| "agent"}`, for example `{"chrome":{"token":"...","actor":"human"},"pi":{"token":"...","actor":"agent"}}` |
-| `CLICKHOUSE_URL` | HTTPS endpoint from the Cloud console, including the port |
-| `CLICKHOUSE_USER` | `ingest` |
-| `CLICKHOUSE_PASSWORD` | password from the console |
-| `CLICKHOUSE_DATABASE` | `herodotus` |
-
-Alchemy reads those same names from the environment at deploy time and stores them as Worker secrets.
-
-## Worker
-
-Local:
-
-```sh
-bun run --filter @herodotus/worker dev
+```dotenv
+AUTH_TOKENS='{"you":{"token":"<human-token>","actor":"human"},"chrome":{"token":"<chrome-token>","actor":"human"},"pi":{"token":"<agent-token>","actor":"agent"}}'
+CLICKHOUSE_URL=https://YOUR-SERVICE.clickhouse.cloud:8443
+CLICKHOUSE_USER=ingest
+CLICKHOUSE_PASSWORD='<password>'
+CLICKHOUSE_DATABASE=herodotus
 ```
 
-Deploy is yours to run:
+Tokens must be distinct. Alchemy uploads these values as Worker secrets. For local development, copy `apps/worker/.dev.vars.example` to gitignored `apps/worker/.dev.vars`, fill it in, and run `bun run --filter @herodotus/worker dev`.
+
+Authenticate Alchemy with the intended Cloudflare account, then deploy from `infra`:
 
 ```sh
-bun run --filter @herodotus/infra deploy
+cd infra
+bun run alchemy deploy --stage prod --dry-run
+bun run alchemy deploy --stage prod
 ```
 
-The stack file is `infra/alchemy.run.ts`. It creates the Worker `herodotus-ingress`, the five secrets, and the rate-limit binding `INGEST_RATE_LIMITER` (namespace `1001`, 60 requests per 60 seconds). One HTTP request counts as one call, including a batch. The rate-limit key is the identity name, never the token. Bun runs that CLI, so `infra` depends on `@effect/platform-bun` 4.0.4 next to Effect 4. The app packages stay on Effect 3.
+The Worker is `herodotus-ingress`. Keep the same stage and working directory for future deployments; preserve `.alchemy` deployment state securely. Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (configured for 60 requests per minute per identity, per Cloudflare location).
 
-After the first deploy, send more than 60 requests in a minute and confirm the Worker returns 429. This binding has failed open in production.
+## Records
 
-`POST /v1/records` with `Authorization: Bearer <token>`. `GET /health` needs no token. Clients should generate `id` before the first POST and reuse that `id` and `ts` on retry. The Worker mints an id only when the body omits one, and a failed insert then cannot be retried as the same row.
+`POST /v1/records` takes `{"schemaVersion":1,"records":[...]}` with `Authorization: Bearer <token>`. Required record fields: `kind`, `via`, `tags`, `ts`. Optional: `id`, `url`, `text`, `title`, `author`, `site`, `publishedAt`, `aboutId`. A record needs text or a URL; `aboutId` links a note to another record.
 
-Each identity has its own token. The Worker stamps `actor` (`human` or `agent`) and, for agents, `agent` (the identity name) from the token. A body that sets either gets a 400. `via` is the client (`chrome`, `cli`) and the client declares it. Ids exist for retries only. Reusing an id from another token replaces that row, and the insert-only user cannot detect it.
+The Worker stamps `actor` and `agent` from the token. Requests setting either are rejected. `kind` and `via` are free strings. See `packages/schema/src/contract.ts` for validation and limits.
 
-Record fields: `kind` (`note`, `video`, `tweet`, `post`, `page`, `selection`, any string), `via`, and `ts` and `tags` are required. `url`, `title`, `author`, `site`, `publishedAt`, `aboutId` (the `id` of the source a note is about), and `text` are optional. A record needs `text` or `url`. Full contract: `PLAN.md`.
-
-## Extension
-
-```sh
-bun run extension:build
-```
-
-In Chrome, open `chrome://extensions`, turn on Developer mode, and load `apps/extension/dist`. Open the extension options and set the worker URL plus the token for the `chrome` identity.
-
-`host_permissions` is `https://*/*` plus localhost because the worker hostname does not exist until you deploy. Narrow that list to the worker origin afterwards.
-
-The popup saves the current page, or the selected text when there is a selection. It reads the page title, `og:title`, author, and published time from the page, sets `site` from the hostname, and infers `kind`: `youtube.com` is `video`, `x.com` and `twitter.com` are `tweet`, a selection is `selection`, anything else is `page`. `via` is always `chrome`.
+Reuse `id` and `ts` on retry. There is no URL deduplication or edit API; reusing an ID can replace a record. ClickHouse replacement is confined to one month and happens during merges; reads needing deduplication use `FINAL`.
 
 ## CLI
 
-Put the Worker URL and one token per identity in `~/.config/herodotus/config.json`, mode `0600`:
+Create `~/.config/herodotus/config.json` with mode `0600`:
 
 ```json
 {
   "url": "https://herodotus-ingress.<account>.workers.dev",
-  "tokens": { "you": "<token>", "pi": "<token>" }
+  "tokens": { "you": "<human-token>", "pi": "<agent-token>" }
 }
 ```
-
-`--as <identity>` (or `HERODOTUS_AS`) is required and has no default. It picks the token, and the Worker decides from the token whether the record is `human` or `agent`. `HERODOTUS_URL` overrides `url`.
 
 ```sh
 bun run --filter @herodotus/cli ingest -- \
   --as you --kind note --text "ship the schema" --tag etl
-
-bun run --filter @herodotus/cli ingest -- \
-  --as pi --kind video --url https://www.youtube.com/watch?v=abc \
-  --title "A talk" --author "A channel" --site youtube.com
 ```
 
-`--kind` is required. `--text`, `--url`, `--title`, `--author`, `--site`, `--published-at` (ISO 8601), and `--about <id>` are optional. `--tag` can be repeated. `via` is always `cli`. Each run generates a new id and prints the id from the Worker response.
+`--as` (or `HERODOTUS_AS`) is mandatory. `HERODOTUS_URL` overrides the configured URL. Optional flags: `--url`, `--text`, `--title`, `--author`, `--site`, `--published-at`, `--about`, and repeated `--tag`. Agents use their own identity/token; `via` is always `cli`.
+
+## Chrome extension
+
+Build with `bun run extension:build`, enable Developer mode at `chrome://extensions`, and load `apps/extension/dist`. Set the Worker URL and Chrome token in its options. Narrow `host_permissions` in `apps/extension/src/manifest.json` to the Worker origin, then rebuild and reload.
+
+The popup captures the URL, selected text, and basic page metadata; it infers video/tweet/page/selection from the hostname and selection. Overlong optional metadata is truncated. While the popup stays open, a failed save can retry the same capture with its original ID and timestamp.
