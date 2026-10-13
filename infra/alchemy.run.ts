@@ -34,10 +34,9 @@ export default Alchemy.Stack(
       },
       env: {
         AUTH_TOKENS: Config.Redacted("AUTH_TOKENS"),
-        CLICKHOUSE_URL: Config.Redacted("CLICKHOUSE_URL"),
-        CLICKHOUSE_USER: Config.Redacted("CLICKHOUSE_USER"),
-        CLICKHOUSE_PASSWORD: Config.Redacted("CLICKHOUSE_PASSWORD"),
-        CLICKHOUSE_DATABASE: Config.Redacted("CLICKHOUSE_DATABASE"),
+        MOTHERDUCK_HOST: Config.Redacted("MOTHERDUCK_HOST"),
+        MOTHERDUCK_DATABASE: Config.Redacted("MOTHERDUCK_DATABASE"),
+        MOTHERDUCK_TOKEN: Config.Redacted("MOTHERDUCK_TOKEN"),
         INGEST_RATE_LIMITER: Cloudflare.RateLimit("INGEST_RATE_LIMITER", {
           namespaceId: "1001",
           simple: { limit: 60, period: 60 },

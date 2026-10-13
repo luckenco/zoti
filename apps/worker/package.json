@@ -7,9 +7,9 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@effect/platform": "0.97.2",
     "@herodotus/schema": "workspace:*",
-    "effect": "3.22.2"
+    "effect": "3.22.2",
+    "pg": "8.16.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261013.1",

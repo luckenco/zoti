@@ -17,7 +17,8 @@ import {
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { TreeFormatter } from "effect/ParseResult"
 import { Auth } from "./auth"
-import { ClickHouse, jsonEachRow, type SettledRow } from "./clickhouse"
+import type { SettledRow } from "./sql"
+import { ItemStore } from "./store"
 import { RateLimit } from "./rate-limit"
 
 export class IdSource extends Context.Tag("IdSource")<
@@ -165,8 +166,8 @@ const ingest = (request: Request) =>
         raw: JSON.stringify(isRecord(original) ? { ...original, id } : { id }),
       })
     }
-    const clickhouse = yield* ClickHouse
-    yield* clickhouse.insert(jsonEachRow(rows))
+    const store = yield* ItemStore
+    yield* store.put(rows)
     return jsonResponse(201, {
       schemaVersion: 1,
       inserted: rows.length,
@@ -191,5 +192,5 @@ const route = (request: Request) =>
 
 export const handle = (
   request: Request,
-): Effect.Effect<Response, never, Auth | RateLimit | ClickHouse | IdSource> =>
+): Effect.Effect<Response, never, Auth | RateLimit | ItemStore | IdSource> =>
   route(request).pipe(Effect.catchAll((error) => Effect.succeed(failureResponse(error))))

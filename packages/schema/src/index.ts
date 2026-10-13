@@ -1,7 +1,7 @@
 export {
   Actor,
   ApiFailureBody,
-  ClickHouseInsertFailed,
+  StoreWriteFailed,
   IngestRequest,
   IngestResponse,
   InvalidBody,

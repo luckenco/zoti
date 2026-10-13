@@ -1,20 +1,19 @@
-import { FetchHttpClient } from "@effect/platform"
 import { Cause, Effect, Layer } from "effect"
 import { authLayer } from "./auth"
 import type { WorkerBindings } from "./bindings"
-import { clickHouseLayer } from "./clickhouse"
 import { handle, idLayer } from "./handler"
+import { motherDuckLayer } from "./motherduck"
 import { rateLimitLayer } from "./rate-limit"
 
 export const appLayer = (env: WorkerBindings) =>
   Layer.mergeAll(
     authLayer(env.AUTH_TOKENS),
     rateLimitLayer(env.INGEST_RATE_LIMITER),
-    clickHouseLayer({
-      url: env.CLICKHOUSE_URL,
-      user: env.CLICKHOUSE_USER,
-      password: env.CLICKHOUSE_PASSWORD,
-      database: env.CLICKHOUSE_DATABASE,
+    // ItemStore is the only storage port. Swap this layer for self-hosted DuckDB.
+    motherDuckLayer({
+      host: env.MOTHERDUCK_HOST,
+      database: env.MOTHERDUCK_DATABASE,
+      token: env.MOTHERDUCK_TOKEN,
     }),
     idLayer,
   )
@@ -40,7 +39,6 @@ export default {
     return Effect.runPromise(
       handle(request).pipe(
         Effect.provide(appLayer(env)),
-        Effect.provide(FetchHttpClient.layer),
         Effect.catchAllCause((cause) => Effect.succeed(defectResponse(cause))),
       ),
     )

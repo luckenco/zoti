@@ -1,6 +1,6 @@
 # Herodotus
 
-Save notes and sources—videos, tweets, posts, pages, selections—with human or agent attribution. A Cloudflare Worker accepts captures from the CLI and Chrome extension and inserts them into ClickHouse. There is no read API yet.
+Save notes and sources—videos, tweets, posts, pages, selections—with human or agent attribution. A Cloudflare Worker accepts captures from the CLI and Chrome extension and upserts them into MotherDuck. There is no read API yet.
 
 ## Development
 
@@ -15,22 +15,21 @@ bun run extension:build
 - `apps/worker`: authentication, validation, ingestion
 - `apps/cli`, `apps/extension`: capture clients
 - `infra/alchemy.run.ts`: Cloudflare deployment
-- `clickhouse`: schema and grants
+- `duckdb`: records table
 
 ## Database and secrets
 
-Create a [ClickHouse Cloud](https://clickhouse.cloud) service and check its pricing. This setup needs **Allow from anywhere** because the Worker has no fixed egress IP; use strong credentials and monitor costs.
+Create a [MotherDuck](https://motherduck.com) database named `herodotus` and run `duckdb/migrations/001_records.sql` while connected to it. Create a read/write access token. MotherDuck does not offer an insert-only token. The Worker sends one upsert and nothing else. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization. The Worker connects on port 5432 with `sslmode=require`.
 
-Run `clickhouse/migrations/001_records.sql`, create the database user `ingest`, then run `clickhouse/grants.sql`. Give that user only INSERT on `herodotus.records`, with no broader roles. Never give the Worker administrative credentials.
+The handler calls `ItemStore.put`. `motherDuckLayer` is the only code that opens MotherDuck. A later move to DuckDB on your own machines replaces that layer and runs the same SQL.
 
 For deployment, put these in gitignored `infra/.env` (mode `0600`):
 
 ```dotenv
 AUTH_TOKENS='{"you":{"token":"<human-token>","actor":"human"},"chrome":{"token":"<chrome-token>","actor":"human"},"pi":{"token":"<agent-token>","actor":"agent"}}'
-CLICKHOUSE_URL=https://YOUR-SERVICE.clickhouse.cloud:8443
-CLICKHOUSE_USER=ingest
-CLICKHOUSE_PASSWORD='<password>'
-CLICKHOUSE_DATABASE=herodotus
+MOTHERDUCK_HOST=pg.us-east-1-aws.motherduck.com
+MOTHERDUCK_DATABASE=herodotus
+MOTHERDUCK_TOKEN='<read-write token>'
 ```
 
 Tokens must be distinct. Alchemy uploads these values as Worker secrets. For local development, copy `apps/worker/.dev.vars.example` to gitignored `apps/worker/.dev.vars`, fill it in, and run `bun run --filter @herodotus/worker dev`.
@@ -51,7 +50,7 @@ The Worker is `herodotus-ingress`. Keep the same stage and working directory for
 
 The Worker stamps `actor` and `agent` from the token. Requests setting either are rejected. `kind` and `via` are free strings. See `packages/schema/src/contract.ts` for validation and limits.
 
-Reuse `id` and `ts` on retry. There is no URL deduplication or edit API; reusing an ID can replace a record. ClickHouse replacement is confined to one month and happens during merges; reads needing deduplication use `FINAL`.
+Reuse `id` and `ts` on retry. There is no URL deduplication or edit API. Sending the same id again updates that one row, and `ingested_at` becomes the time of that write.
 
 ## CLI
 

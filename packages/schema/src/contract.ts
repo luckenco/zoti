@@ -68,9 +68,7 @@ export class PayloadTooLarge extends Data.TaggedError("PayloadTooLarge") {}
 
 export class RateLimited extends Data.TaggedError("RateLimited") {}
 
-export class ClickHouseInsertFailed extends Data.TaggedError("ClickHouseInsertFailed")<{
-  readonly status: number
-}> {}
+export class StoreWriteFailed extends Data.TaggedError("StoreWriteFailed") {}
 
 export class Misconfigured extends Data.TaggedError("Misconfigured")<{
   readonly message: string
@@ -84,7 +82,7 @@ export type ApiFailure =
   | Unauthorized
   | PayloadTooLarge
   | RateLimited
-  | ClickHouseInsertFailed
+  | StoreWriteFailed
   | Misconfigured
   | NotFound
 
@@ -97,10 +95,7 @@ export const ApiFailureBody = Schema.Union(
   Schema.Struct({ _tag: Schema.Literal("Unauthorized") }),
   Schema.Struct({ _tag: Schema.Literal("PayloadTooLarge") }),
   Schema.Struct({ _tag: Schema.Literal("RateLimited") }),
-  Schema.Struct({
-    _tag: Schema.Literal("ClickHouseInsertFailed"),
-    status: Schema.Number,
-  }),
+  Schema.Struct({ _tag: Schema.Literal("StoreWriteFailed") }),
   Schema.Struct({ _tag: Schema.Literal("Misconfigured"), message: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("NotFound") }),
 )
@@ -118,8 +113,8 @@ export const apiFailureBody = (error: ApiFailure): ApiFailureBody => {
       return { _tag: "PayloadTooLarge" }
     case "RateLimited":
       return { _tag: "RateLimited" }
-    case "ClickHouseInsertFailed":
-      return { _tag: "ClickHouseInsertFailed", status: error.status }
+    case "StoreWriteFailed":
+      return { _tag: "StoreWriteFailed" }
     case "Misconfigured":
       return { _tag: "Misconfigured", message: error.message }
     case "NotFound":
@@ -144,7 +139,7 @@ export const statusForFailure = (error: ApiFailure): number => {
       return 413
     case "RateLimited":
       return 429
-    case "ClickHouseInsertFailed":
+    case "StoreWriteFailed":
       return 502
     case "Misconfigured":
       return 500

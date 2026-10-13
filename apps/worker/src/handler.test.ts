@@ -1,14 +1,11 @@
-import { HttpClient, HttpClientResponse } from "@effect/platform"
-import type { HttpBody } from "@effect/platform/HttpBody"
-import type { HttpClientRequest } from "@effect/platform/HttpClientRequest"
-import * as UrlParams from "@effect/platform/UrlParams"
 import { describe, it } from "@effect/vitest"
 import assert from "node:assert/strict"
 import { Effect, Layer } from "effect"
 import { authLayer } from "./auth"
-import { clickHouseLayer } from "./clickhouse"
 import { handle, IdSource } from "./handler"
+import { motherDuckLayer, type SqlSession } from "./motherduck"
 import { rateLimitLayer, type RateLimitBinding } from "./rate-limit"
+import type { SettledRow, SqlStatement } from "./sql"
 
 const fixedId = "22222222-2222-4222-8222-222222222222"
 const knownId = "0f8fad5b-d9cb-469f-a165-70867728950e"
@@ -18,27 +15,26 @@ const tokens = JSON.stringify({
   pi: { token: "pi-token", actor: "agent" },
 })
 
-const clickHouseConfig = {
-  url: "https://ch.example:8443/",
-  user: "ingest",
-  password: "test-password",
+const motherDuckConfig = {
+  host: "pg.example.test",
   database: "herodotus",
+  token: "test-password",
 }
 
-interface RecordedRequest {
-  readonly url: string
-  readonly body: string
-  readonly user: string | undefined
-  readonly key: string | undefined
-}
+const conflict =
+  "ON CONFLICT (id) DO UPDATE SET kind = EXCLUDED.kind, via = EXCLUDED.via, actor = EXCLUDED.actor, agent = EXCLUDED.agent, url = EXCLUDED.url, title = EXCLUDED.title, author = EXCLUDED.author, site = EXCLUDED.site, published_at = EXCLUDED.published_at, about_id = EXCLUDED.about_id, text = EXCLUDED.text, tags = EXCLUDED.tags, ts = EXCLUDED.ts, raw = EXCLUDED.raw, ingested_at = now()"
 
-const bodyText = (body: HttpBody): string =>
-  body._tag === "Uint8Array" ? new TextDecoder().decode(body.body) : ""
+const oneRowSql = `INSERT INTO herodotus.records (id, kind, via, actor, agent, url, title, author, site, published_at, about_id, text, tags, ts, raw) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) ${conflict}`
 
-const wireUrl = (request: HttpClientRequest): string => {
-  const built = UrlParams.makeUrl(request.url, request.urlParams, request.hash)
-  if (built._tag === "Left") throw built.left
-  return built.right.toString()
+const twoRowSql = `INSERT INTO herodotus.records (id, kind, via, actor, agent, url, title, author, site, published_at, about_id, text, tags, ts, raw) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15), ($16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30) ${conflict}`
+
+const connectionString =
+  "postgresql://postgres:test-password@pg.example.test:5432/herodotus?sslmode=require"
+
+interface RecordedStatement {
+  readonly connectionString: string
+  readonly text: string
+  readonly values: ReadonlyArray<unknown>
 }
 
 const post = (path: string, body: unknown, token = "chrome-token"): Request =>
@@ -74,9 +70,6 @@ const note = {
   ts: "2026-10-13T11:00:00.000Z",
   futureField: "keep-me",
 }
-
-const insert = (rows: ReadonlyArray<unknown>): string =>
-  `INSERT INTO herodotus.records FORMAT JSONEachRow\n${rows.map((row) => JSON.stringify(row)).join("\n")}\n`
 
 const videoRow = (actor: string, agent: string | null) => ({
   id: knownId,
@@ -114,16 +107,35 @@ const noteRow = (actor: string, agent: string | null) => ({
   raw: JSON.stringify(note),
 })
 
+const bound = (row: SettledRow): ReadonlyArray<unknown> => [
+  row.id,
+  row.kind,
+  row.via,
+  row.actor,
+  row.agent,
+  row.url,
+  row.title,
+  row.author,
+  row.site,
+  row.published_at,
+  row.about_id,
+  row.text,
+  row.tags,
+  row.ts,
+  row.raw,
+]
+
 const run = (options: {
   readonly request: Request
-  readonly password?: string
+  readonly token?: string
+  readonly database?: string
   readonly allow?: boolean
-  readonly clickHouseStatus?: number
-  readonly clickHouseBody?: string
+  readonly failMessage?: string
   readonly authTokens?: string
   readonly limiterThrows?: boolean
 }) => {
-  const recorded: Array<RecordedRequest> = []
+  const recorded: Array<RecordedStatement> = []
+  const closed: Array<string> = []
   const keys: Array<string> = []
   const logs: Array<string> = []
   const binding: RateLimitBinding = {
@@ -133,26 +145,29 @@ const run = (options: {
       return Promise.resolve({ success: options.allow ?? true })
     },
   }
-  const http = HttpClient.make((request) => {
-    recorded.push({
-      url: wireUrl(request),
-      body: bodyText(request.body),
-      user: request.headers["x-clickhouse-user"],
-      key: request.headers["x-clickhouse-key"],
+  const open = (connectionString: string): Promise<SqlSession> =>
+    Promise.resolve({
+      query: (statement: SqlStatement) => {
+        recorded.push({ connectionString, text: statement.text, values: statement.values })
+        if (options.failMessage !== undefined) return Promise.reject(new Error(options.failMessage))
+        return Promise.resolve()
+      },
+      close: () => {
+        closed.push(connectionString)
+        return Promise.resolve()
+      },
     })
-    return Effect.succeed(
-      HttpClientResponse.fromWeb(
-        request,
-        new Response(options.clickHouseBody ?? "", { status: options.clickHouseStatus ?? 200 }),
-      ),
-    )
-  })
   const layer = Layer.mergeAll(
     authLayer(options.authTokens ?? tokens),
     rateLimitLayer(binding),
-    clickHouseLayer({ ...clickHouseConfig, password: options.password ?? clickHouseConfig.password }),
+    motherDuckLayer({
+      ...motherDuckConfig,
+      token: options.token ?? motherDuckConfig.token,
+      database: options.database ?? motherDuckConfig.database,
+      open,
+    }),
     Layer.succeed(IdSource, { next: Effect.succeed(fixedId) }),
-  ).pipe(Layer.provide(Layer.succeed(HttpClient.HttpClient, http)))
+  )
 
   return Effect.acquireUseRelease(
     Effect.sync(() => {
@@ -171,21 +186,23 @@ const run = (options: {
             body: await response.text(),
             retryAfter: response.headers.get("retry-after"),
             recorded,
+            closed,
             keys,
             logs,
           })),
         ),
       ),
-    (original) => Effect.sync(() => {
-      console.error = original
-    }),
+    (original) =>
+      Effect.sync(() => {
+        console.error = original
+      }),
   )
 }
 
 const records = (...items: ReadonlyArray<unknown>) => ({ schemaVersion: 1, records: items })
 
 describe("worker handler", () => {
-  it.effect("inserts a batch as JSONEachRow, stamped human", () =>
+  it.effect("upserts a batch by id, stamped human", () =>
     Effect.gen(function* () {
       const result = yield* run({ request: post("/v1/records", records(video, note)) })
       assert.equal(result.status, 201)
@@ -196,15 +213,13 @@ describe("worker handler", () => {
       assert.equal(result.recorded.length, 1)
       const sent = result.recorded[0]
       assert.ok(sent)
-      assert.equal(sent.body, insert([videoRow("human", null), noteRow("human", null)]))
-      assert.equal(sent.body.includes("ingested_at"), false)
-      assert.equal(
-        sent.url,
-        "https://ch.example:8443/?database=herodotus&date_time_input_format=best_effort",
-      )
-      assert.equal(sent.url.includes("test-password"), false)
-      assert.equal(sent.user, "ingest")
-      assert.equal(sent.key, "test-password")
+      assert.equal(sent.text, twoRowSql)
+      assert.equal(sent.text.includes("ingested_at"), true)
+      assert.equal(sent.text.startsWith("INSERT INTO herodotus.records (id, kind, via, actor, agent, url, title, author, site, published_at, about_id, text, tags, ts, raw)"), true)
+      assert.deepEqual(sent.values, [...bound(videoRow("human", null)), ...bound(noteRow("human", null))])
+      assert.equal(sent.connectionString, connectionString)
+      assert.equal(sent.text.includes("test-password"), false)
+      assert.deepEqual(result.closed, [connectionString])
       assert.deepEqual(result.keys, ["chrome"])
     }),
   )
@@ -213,7 +228,8 @@ describe("worker handler", () => {
     Effect.gen(function* () {
       const result = yield* run({ request: post("/v1/records", records(video), "pi-token") })
       assert.equal(result.status, 201)
-      assert.equal(result.recorded[0]?.body, insert([videoRow("agent", "pi")]))
+      assert.equal(result.recorded[0]?.text, oneRowSql)
+      assert.deepEqual(result.recorded[0]?.values, bound(videoRow("agent", "pi")))
       assert.deepEqual(result.keys, ["pi"])
     }),
   )
@@ -248,7 +264,8 @@ describe("worker handler", () => {
       const second = yield* run({ request: post("/v1/records", records(video)) })
       assert.equal(first.status, 201)
       assert.equal(second.status, 201)
-      assert.equal(first.recorded[0]?.body, second.recorded[0]?.body)
+      assert.deepEqual(first.recorded[0]?.values, second.recorded[0]?.values)
+      assert.equal(first.recorded[0]?.text, oneRowSql)
       assert.equal(first.body, JSON.stringify({ schemaVersion: 1, inserted: 1, ids: [knownId] }))
     }),
   )
@@ -259,15 +276,14 @@ describe("worker handler", () => {
       const result = yield* run({ request: post("/v1/records", records(withoutId)) })
       assert.equal(result.status, 201)
       assert.equal(result.body, JSON.stringify({ schemaVersion: 1, inserted: 1, ids: [fixedId] }))
-      assert.equal(
-        result.recorded[0]?.body,
-        insert([
-          {
-            ...videoRow("human", null),
-            id: fixedId,
-            raw: JSON.stringify({ ...withoutId, id: fixedId }),
-          },
-        ]),
+      assert.equal(result.recorded[0]?.text, oneRowSql)
+      assert.deepEqual(
+        result.recorded[0]?.values,
+        bound({
+          ...videoRow("human", null),
+          id: fixedId,
+          raw: JSON.stringify({ ...withoutId, id: fixedId }),
+        }),
       )
     }),
   )
@@ -278,6 +294,7 @@ describe("worker handler", () => {
       assert.equal(result.status, 401)
       assert.equal(result.body, JSON.stringify({ _tag: "Unauthorized" }))
       assert.equal(result.recorded.length, 0)
+      assert.deepEqual(result.closed, [])
       assert.deepEqual(result.keys, ["anonymous"])
     }),
   )
@@ -293,26 +310,28 @@ describe("worker handler", () => {
     }),
   )
 
-  it.effect("hides the ClickHouse error body", () =>
+  it.effect("hides the database error", () =>
     Effect.gen(function* () {
       const result = yield* run({
         request: post("/v1/records", records(video)),
-        clickHouseStatus: 500,
-        clickHouseBody: "SENTINEL_CH_ERROR",
+        failMessage: "SENTINEL_MD_ERROR test-password",
       })
       assert.equal(result.status, 502)
-      assert.equal(result.body, JSON.stringify({ _tag: "ClickHouseInsertFailed", status: 500 }))
-      assert.equal(result.body.includes("SENTINEL_CH_ERROR"), false)
-      assert.equal(result.logs.some((line) => line.includes("SENTINEL_CH_ERROR")), true)
+      assert.equal(result.body, JSON.stringify({ _tag: "StoreWriteFailed" }))
+      assert.equal(result.body.includes("SENTINEL_MD_ERROR"), false)
+      assert.equal(result.logs.some((line) => line.includes("SENTINEL_MD_ERROR")), true)
+      assert.equal(result.logs.some((line) => line.includes("test-password")), false)
+      assert.deepEqual(result.closed, [connectionString])
     }),
   )
 
-  it.effect("answers health without ClickHouse", () =>
+  it.effect("answers health without the database", () =>
     Effect.gen(function* () {
       const result = yield* run({ request: new Request("https://worker.example/health") })
       assert.equal(result.status, 200)
       assert.equal(result.body, JSON.stringify({ ok: true }))
       assert.equal(result.recorded.length, 0)
+      assert.deepEqual(result.closed, [])
       assert.deepEqual(result.keys, [])
     }),
   )
@@ -337,15 +356,25 @@ describe("worker handler", () => {
     }),
   )
 
-  it.effect("rejects an empty ClickHouse password before fetch", () =>
+  it.effect("rejects an empty token before connect", () =>
     Effect.gen(function* () {
-      const result = yield* run({ request: post("/v1/records", records(video)), password: "" })
+      const result = yield* run({ request: post("/v1/records", records(video)), token: "" })
       assert.equal(result.status, 500)
-      assert.equal(
-        result.body,
-        JSON.stringify({ _tag: "Misconfigured", message: "CLICKHOUSE_PASSWORD is empty" }),
-      )
+      assert.equal(result.body, JSON.stringify({ _tag: "Misconfigured", message: "MOTHERDUCK_TOKEN is empty" }))
       assert.equal(result.recorded.length, 0)
+      assert.deepEqual(result.closed, [])
+    }),
+  )
+
+  it.effect("encodes a token that would break the connection string", () =>
+    Effect.gen(function* () {
+      const result = yield* run({ request: post("/v1/records", records(video)), token: "p@ss/word" })
+      assert.equal(result.status, 201)
+      assert.equal(
+        result.recorded[0]?.connectionString,
+        "postgresql://postgres:p%40ss%2Fword@pg.example.test:5432/herodotus?sslmode=require",
+      )
+      assert.equal(result.recorded[0]?.text.includes("p@ss/word"), false)
     }),
   )
 

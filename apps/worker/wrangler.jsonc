@@ -7,10 +7,9 @@
   "secrets": {
     "required": [
       "AUTH_TOKENS",
-      "CLICKHOUSE_URL",
-      "CLICKHOUSE_USER",
-      "CLICKHOUSE_PASSWORD",
-      "CLICKHOUSE_DATABASE"
+      "MOTHERDUCK_HOST",
+      "MOTHERDUCK_DATABASE",
+      "MOTHERDUCK_TOKEN"
     ]
   },
   "observability": {

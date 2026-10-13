@@ -1,5 +1,4 @@
 AUTH_TOKENS={"chrome":{"token":"replace-chrome-token","actor":"human"},"you":{"token":"replace-human-token","actor":"human"},"pi":{"token":"replace-agent-token","actor":"agent"}}
-CLICKHOUSE_URL=https://your-service.region.aws.clickhouse.cloud:8443
-CLICKHOUSE_USER=ingest
-CLICKHOUSE_PASSWORD=replace-me
-CLICKHOUSE_DATABASE=herodotus
+MOTHERDUCK_HOST=pg.us-east-1-aws.motherduck.com
+MOTHERDUCK_DATABASE=herodotus
+MOTHERDUCK_TOKEN=replace-me
