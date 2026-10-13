@@ -6,7 +6,10 @@ declare module "pg" {
       readonly query_timeout?: number
     })
     connect(): Promise<void>
-    query(queryText: string, values?: ReadonlyArray<unknown>): Promise<unknown>
+    query(
+      queryText: string,
+      values?: ReadonlyArray<unknown>,
+    ): Promise<{ readonly rows?: ReadonlyArray<Record<string, unknown>> }>
     end(): Promise<void>
   }
 }

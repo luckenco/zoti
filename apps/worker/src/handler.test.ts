@@ -150,7 +150,7 @@ const run = (options: {
       query: (statement: SqlStatement) => {
         recorded.push({ connectionString, text: statement.text, values: statement.values })
         if (options.failMessage !== undefined) return Promise.reject(new Error(options.failMessage))
-        return Promise.resolve()
+        return Promise.resolve([])
       },
       close: () => {
         closed.push(connectionString)

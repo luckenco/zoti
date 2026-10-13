@@ -1,4 +1,4 @@
-AUTH_TOKENS={"chrome":{"token":"replace-chrome-token","actor":"human"},"you":{"token":"replace-human-token","actor":"human"},"pi":{"token":"replace-agent-token","actor":"agent"}}
+AUTH_TOKENS={"chrome":{"token":"replace-chrome-token","actor":"human"},"you":{"token":"replace-human-token","actor":"human"},"pi":{"token":"replace-agent-token","actor":"agent"},"grokbot":{"token":"replace-grokbot-token","actor":"agent"}}
 MOTHERDUCK_HOST=pg.us-east-1-aws.motherduck.com
 MOTHERDUCK_DATABASE=herodotus
 MOTHERDUCK_TOKEN=replace-me

@@ -16,7 +16,7 @@ export interface SettledRow {
   readonly raw: string
 }
 
-export type SqlValue = string | null | ReadonlyArray<string>
+export type SqlValue = string | number | null | ReadonlyArray<string>
 
 export interface SqlStatement {
   readonly text: string
@@ -64,9 +64,82 @@ const assignments = [
   "ingested_at = now()",
 ] as const
 
-export const insertRecords = (database: string, rows: ReadonlyArray<SettledRow>): SqlStatement => {
+const databaseName = (database: string): string => {
   const name = identifier(database)
   if (name === undefined) throw new Error("database is not an identifier")
+  return name
+}
+
+export const defaultReadLimit = 20
+export const maxReadLimit = 100
+
+export interface RecordSearch {
+  readonly text: string | null
+  readonly tag: string | null
+  readonly via: string | null
+  readonly kind: string | null
+  readonly from: string | null
+  readonly to: string | null
+  readonly limit: number
+}
+
+const selectedColumns = [
+  "id::VARCHAR AS id",
+  "kind",
+  "via",
+  "actor",
+  "agent",
+  "url",
+  "title",
+  "author",
+  "site",
+  "published_at",
+  "about_id::VARCHAR AS about_id",
+  "text",
+  "to_json(tags) AS tags",
+  "ts",
+].join(", ")
+
+const absent = (value: string | null): string | null => (value === null || value.length === 0 ? null : value)
+
+const limitValue = (limit: number): number => {
+  if (!Number.isInteger(limit) || limit < 1 || limit > maxReadLimit) {
+    throw new Error("limit must be an integer from 1 to 100")
+  }
+  return limit
+}
+
+export const searchRecords = (database: string, query: RecordSearch): SqlStatement => ({
+  text: [
+    `SELECT ${selectedColumns}`,
+    `FROM ${databaseName(database)}.records`,
+    "WHERE ($1 IS NULL OR contains(lower(text), lower($1)))",
+    "AND ($2 IS NULL OR list_contains(tags, $2))",
+    "AND ($3 IS NULL OR via = $3)",
+    "AND ($4 IS NULL OR kind = $4)",
+    "AND ($5 IS NULL OR ts >= CAST($5 AS TIMESTAMPTZ))",
+    "AND ($6 IS NULL OR ts <= CAST($6 AS TIMESTAMPTZ))",
+    "ORDER BY ts DESC",
+    "LIMIT $7",
+  ].join(" "),
+  values: [
+    absent(query.text),
+    absent(query.tag),
+    absent(query.via),
+    absent(query.kind),
+    absent(query.from),
+    absent(query.to),
+    limitValue(query.limit),
+  ],
+})
+
+export const recentRecords = (database: string, limit: number): SqlStatement => ({
+  text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records ORDER BY ts DESC LIMIT $1`,
+  values: [limitValue(limit)],
+})
+
+export const insertRecords = (database: string, rows: ReadonlyArray<SettledRow>): SqlStatement => {
+  const name = databaseName(database)
   const values: Array<SqlValue> = []
   const tuples = rows.map((row) => {
     const start = values.length

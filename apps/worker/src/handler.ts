@@ -11,12 +11,14 @@ import {
   Misconfigured,
   NotFound,
   PayloadTooLarge,
+  RateLimited,
+  RecordInput,
   Unauthorized,
   UnsupportedSchemaVersion,
 } from "@herodotus/schema"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
 import { TreeFormatter } from "effect/ParseResult"
-import { Auth } from "./auth"
+import { Auth, type Identity } from "./auth"
 import { ItemStore } from "./motherduck"
 import type { SettledRow } from "./sql"
 import { RateLimit } from "./rate-limit"
@@ -54,7 +56,7 @@ const jsonResponse = (
     },
   })
 
-const failureResponse = (error: ApiFailure): Response =>
+export const failureResponse = (error: ApiFailure): Response =>
   jsonResponse(
     statusForFailure(error),
     apiFailureBody(error),
@@ -106,19 +108,52 @@ const settleId = Effect.gen(function* () {
   )
 })
 
-const ingest = (request: Request) =>
+export const authorize = (
+  header: string | null,
+): Effect.Effect<Identity, Unauthorized | RateLimited | Misconfigured, Auth | RateLimit> =>
   Effect.gen(function* () {
-    if (declaredTooLarge(request)) return yield* new PayloadTooLarge()
     const auth = yield* Auth
     const limiter = yield* RateLimit
-    const identified = yield* auth.identify(request.headers.get("authorization")).pipe(Effect.either)
+    const identified = yield* auth.identify(header).pipe(Effect.either)
     if (identified._tag === "Left") {
       if (identified.left._tag === "Misconfigured") return yield* identified.left
       yield* limiter.consume("anonymous")
       return yield* new Unauthorized()
     }
-    const identity = identified.right
-    yield* limiter.consume(identity.name)
+    yield* limiter.consume(identified.right.name)
+    return identified.right
+  })
+
+export const settleRecord = (
+  record: RecordInput,
+  original: unknown,
+  identity: Identity,
+): Effect.Effect<SettledRow, Misconfigured, IdSource> =>
+  Effect.gen(function* () {
+    const id = record.id ?? (yield* settleId)
+    return {
+      id,
+      kind: record.kind,
+      via: record.via,
+      actor: identity.actor,
+      agent: identity.actor === "agent" ? identity.name : null,
+      url: record.url ?? null,
+      title: record.title ?? null,
+      author: record.author ?? null,
+      site: record.site ?? null,
+      published_at: record.publishedAt ? DateTime.formatIso(record.publishedAt) : null,
+      about_id: record.aboutId ?? null,
+      text: record.text ?? "",
+      tags: record.tags,
+      ts: DateTime.formatIso(record.ts),
+      raw: JSON.stringify(isRecord(original) ? { ...original, id } : { id }),
+    }
+  })
+
+const ingest = (request: Request) =>
+  Effect.gen(function* () {
+    if (declaredTooLarge(request)) return yield* new PayloadTooLarge()
+    const identity = yield* authorize(request.headers.get("authorization"))
 
     const text = yield* readLimited(request)
     const json = yield* Effect.try({
@@ -146,25 +181,7 @@ const ingest = (request: Request) =>
     for (let index = 0; index < decoded.records.length; index++) {
       const record = decoded.records[index]
       if (record === undefined) return yield* Effect.die("decoded record missing")
-      const id = record.id ?? (yield* settleId)
-      const original = originals[index]
-      rows.push({
-        id,
-        kind: record.kind,
-        via: record.via,
-        actor: identity.actor,
-        agent: identity.actor === "agent" ? identity.name : null,
-        url: record.url ?? null,
-        title: record.title ?? null,
-        author: record.author ?? null,
-        site: record.site ?? null,
-        published_at: record.publishedAt ? DateTime.formatIso(record.publishedAt) : null,
-        about_id: record.aboutId ?? null,
-        text: record.text ?? "",
-        tags: record.tags,
-        ts: DateTime.formatIso(record.ts),
-        raw: JSON.stringify(isRecord(original) ? { ...original, id } : { id }),
-      })
+      rows.push(yield* settleRecord(record, originals[index], identity))
     }
     const store = yield* ItemStore
     yield* store.put(rows)

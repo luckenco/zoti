@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { insertRecords, type SqlValue } from "./sql"
+import { insertRecords, recentRecords, searchRecords, type SqlStatement, type SqlValue } from "./sql"
 
 const knownId = "0f8fad5b-d9cb-469f-a165-70867728950e"
 const secondId = "11111111-1111-4111-8111-111111111111"
@@ -13,6 +13,7 @@ const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`
 
 const literal = (value: SqlValue): string => {
   if (value === null) return "NULL"
+  if (typeof value === "number") return String(value)
   if (typeof value !== "string") return `[${value.map((item) => quote(item)).join(", ")}]`
   return quote(value)
 }
@@ -129,5 +130,91 @@ describe("records sql on duckdb", () => {
         has_ingested: true,
       },
     ])
+  })
+
+  it("runs the fixed search and recent statements", () => {
+    const passage = {
+      id: knownId,
+      kind: "video",
+      via: "chrome",
+      actor: "human",
+      agent: null,
+      url: null,
+      title: null,
+      author: null,
+      site: null,
+      published_at: null,
+      about_id: null,
+      text: "the selected passage",
+      tags: ["reading"],
+      ts: "2026-10-13T10:52:00.000Z",
+      raw: "{}",
+    }
+    const other = {
+      ...passage,
+      id: secondId,
+      kind: "note",
+      via: "cli",
+      text: "other note",
+      tags: ["etl"],
+      ts: "2026-10-14T10:52:00.000Z",
+    }
+    const batch = insertRecords("herodotus", [passage, other])
+    const run = (statement: SqlStatement) => {
+      const name = statement.text.startsWith("SELECT id::VARCHAR AS id, kind, via") ? "read" : "batch"
+      const script = [
+        "ATTACH ':memory:' AS herodotus;",
+        "USE herodotus;",
+        migration,
+        `PREPARE batch AS ${batch.text};`,
+        `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
+        `PREPARE ${name} AS ${statement.text};`,
+        `EXECUTE ${name}(${statement.values.map((value) => literal(value)).join(", ")});`,
+      ].join("\n")
+      const result = spawnSync("duckdb", ["-json", ":memory:"], { input: script, encoding: "utf8" })
+      assert.equal(result.status, 0, result.stderr)
+      const stdout = result.stdout.trim()
+      return (stdout.length === 0 ? [] : JSON.parse(stdout)) as ReadonlyArray<{ id: string }>
+    }
+    const ids = (statement: SqlStatement) => run(statement).map((row) => row.id)
+    assert.deepEqual(
+      ids(searchRecords("herodotus", { text: "PASSAGE", tag: null, via: null, kind: null, from: null, to: null, limit: 100 })),
+      [knownId],
+    )
+    assert.deepEqual(
+      ids(searchRecords("herodotus", { text: null, tag: "reading", via: "chrome", kind: "video", from: null, to: null, limit: 100 })),
+      [knownId],
+    )
+    assert.deepEqual(
+      ids(
+        searchRecords("herodotus", {
+          text: null,
+          tag: null,
+          via: null,
+          kind: null,
+          from: "2026-10-14T00:00:00.000Z",
+          to: null,
+          limit: 100,
+        }),
+      ),
+      [secondId],
+    )
+    assert.deepEqual(
+      ids(searchRecords("herodotus", { text: "", tag: null, via: null, kind: null, from: null, to: null, limit: 1 })),
+      [secondId],
+    )
+    assert.deepEqual(ids(recentRecords("herodotus", 1)), [secondId])
+    const payload = "'; DROP TABLE records; --"
+    const injected = searchRecords("herodotus", {
+      text: payload,
+      tag: null,
+      via: null,
+      kind: null,
+      from: null,
+      to: null,
+      limit: 20,
+    })
+    assert.equal(injected.text.includes(payload), false)
+    assert.deepEqual(ids(injected), [])
   })
 })
