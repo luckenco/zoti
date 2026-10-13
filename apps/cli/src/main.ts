@@ -39,7 +39,7 @@ const run = Command.run(root, {
 })
 
 NodeRuntime.runMain(
-  run(process.argv.slice(2)).pipe(
+  run(process.argv).pipe(
     Effect.provide(Layer.mergeAll(NodeContext.layer, FetchHttpClient.layer)),
   ),
 )

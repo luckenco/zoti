@@ -6,8 +6,8 @@ Capture pages, selections, notes, and bookmarks into one ClickHouse table. A Clo
 
 All of the following are true on a clean checkout.
 
-1. `pnpm typecheck` exits 0.
-2. `pnpm test` exits 0. The suite includes the cases in [Tests](#tests).
+1. `bun run typecheck` exits 0.
+2. `bun run test` exits 0. The suite includes the cases in [Tests](#tests).
 3. `clickhouse/migrations/001_items.sql` creates `items` with the columns below, `ReplacingMergeTree`, an `ORDER BY` that ends in `id`, and a `PARTITION BY`.
 4. `apps/worker`, `apps/cli`, and `apps/extension` import the item schema from `packages/schema`. They do not declare a second copy.
 5. `infra/alchemy.run.ts` declares the Worker, its secrets, and a rate-limit binding. Running it is Cal's job.
@@ -208,7 +208,7 @@ If the installed beta exports different names, the infra file follows the instal
 
 ```
 package.json
-pnpm-workspace.yaml
+bun.lock
 tsconfig.base.json
 vitest.config.ts
 PLAN.md
@@ -223,7 +223,7 @@ clickhouse/migrations/001_items.sql
 clickhouse/grants.sql
 ```
 
-pnpm workspaces. Each package has its own `package.json` and `tsconfig.json`. The schema package depends on `effect`. The Worker, CLI, and extension depend on the schema package via `workspace:*`.
+Bun workspaces, declared on the root `package.json`. Each package has its own `package.json` and `tsconfig.json`. The schema package depends on `effect`. The Worker, CLI, and extension depend on the schema package via `workspace:*`.
 
 ## Tests
 
@@ -259,13 +259,13 @@ ClickHouse, only if a local server or `clickhouse-local` can be installed withou
 
 1. Commit this plan.
 2. Review it and fold in the changes worth making.
-3. Workspace toolchain, with `pnpm typecheck` and `pnpm test` as empty successes.
+3. Workspace toolchain, with `bun run typecheck` and `bun run test` as empty successes.
 4. Schema package and its tests.
 5. ClickHouse SQL, then the local apply check when a server exists.
 6. Worker handler and its tests.
 7. CLI and its test.
 8. Extension and its test.
-9. Alchemy file, README, and a final `pnpm test` plus `pnpm typecheck`.
+9. Alchemy file, README, and a final `bun run test` plus `bun run typecheck`.
 
 Each step is committed only after its check passes. Later steps do not start on a red suite.
 

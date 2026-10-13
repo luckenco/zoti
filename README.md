@@ -19,10 +19,10 @@ clickhouse/grants.sql    INSERT grant for user ingest
 ## Checks
 
 ```sh
-pnpm install
-pnpm typecheck
-pnpm test
-pnpm extension:build
+bun install
+bun run typecheck
+bun run test
+bun run extension:build
 ```
 
 ## ClickHouse Cloud
@@ -54,16 +54,16 @@ Alchemy reads those same names from the environment at deploy time and stores th
 Local:
 
 ```sh
-pnpm --filter @private-life/worker exec wrangler dev
+bun run --filter @private-life/worker dev
 ```
 
 Deploy is yours to run:
 
 ```sh
-pnpm --filter @private-life/infra exec alchemy deploy
+bun run --filter @private-life/infra deploy
 ```
 
-The stack file is `infra/alchemy.run.ts`. It creates the Worker `private-life-ingress`, the five secrets, and the rate-limit binding `INGEST_RATE_LIMITER` (namespace `1001`, 60 requests per 60 seconds). One HTTP request counts as one call, including a batch. The rate-limit key is the client name, never the token.
+The stack file is `infra/alchemy.run.ts`. It creates the Worker `private-life-ingress`, the five secrets, and the rate-limit binding `INGEST_RATE_LIMITER` (namespace `1001`, 60 requests per 60 seconds). One HTTP request counts as one call, including a batch. The rate-limit key is the client name, never the token. Bun runs that CLI, so `infra` depends on `@effect/platform-bun` 4.0.4 next to Effect 4. The app packages stay on Effect 3.
 
 After the first deploy, send more than 60 requests in a minute and confirm the Worker returns 429. This binding has failed open in production.
 
@@ -72,7 +72,7 @@ After the first deploy, send more than 60 requests in a minute and confirm the W
 ## Extension
 
 ```sh
-pnpm extension:build
+bun run extension:build
 ```
 
 In Chrome, open `chrome://extensions`, turn on Developer mode, and load `apps/extension/dist`. Open the extension options and set the worker URL plus the `chrome` token.
@@ -86,7 +86,7 @@ The popup saves the current selection. With no selection it saves the page title
 ```sh
 PRIVATE_LIFE_URL=https://private-life-ingress.<account>.workers.dev \
 PRIVATE_LIFE_TOKEN=<cli token> \
-pnpm --filter @private-life/cli exec private-life ingest \
+bun run --filter @private-life/cli ingest -- \
   --type note --text "ship the schema" --tag etl
 ```
 

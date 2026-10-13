@@ -6,6 +6,9 @@
   "bin": {
     "private-life": "./bin/private-life.mjs"
   },
+  "scripts": {
+    "ingest": "node ./bin/private-life.mjs ingest"
+  },
   "dependencies": {
     "@effect/cli": "0.77.2",
     "@effect/platform": "0.97.2",

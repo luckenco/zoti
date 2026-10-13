@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "dev": "wrangler dev"
+  },
   "dependencies": {
     "@effect/platform": "0.97.2",
     "@private-life/schema": "workspace:*",
