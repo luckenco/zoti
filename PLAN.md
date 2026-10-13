@@ -168,11 +168,13 @@ POST {CLICKHOUSE_URL}/?database={CLICKHOUSE_DATABASE}&date_time_input_format=bes
 X-ClickHouse-User: {CLICKHOUSE_USER}
 X-ClickHouse-Key: {CLICKHOUSE_PASSWORD}
 
-INSERT INTO items FORMAT JSONEachRow
-{"id":"...","url":"...","text":"...","type":"...","source":"...","tags":["..."],"ts":"...","raw":"..."}
+INSERT INTO private_life.items FORMAT JSONEachRow
+{"id":"...","url":null,"text":"...","type":"...","source":"...","tags":["..."],"ts":"...","raw":"..."}
 ```
 
-`ingested_at` is omitted so the column default runs. `date_time_input_format=best_effort` accepts the ISO-8601 timestamp the schema encodes. Headers are `X-ClickHouse-User` and `X-ClickHouse-Key`. The password is not placed in the URL.
+Each data line is `JSON.stringify` of one row object. String fields are escaped by that call, not by hand. `ingested_at` is omitted so the column default runs. The table name is qualified so a wrong `database` parameter cannot write somewhere else. `date_time_input_format=best_effort` accepts the ISO-8601 timestamp the schema encodes. Headers are `X-ClickHouse-User` and `X-ClickHouse-Key`. The password is not placed in the URL.
+
+ClickHouse Cloud can restrict client IPs. Cloudflare Workers do not publish a stable egress range. Cal leaves the service open to the internet and relies on the user password, or the inserts fail from the edge. The README says this before the deploy step.
 
 Services are Effect `Context.Tag`s. Live layers read the Worker env. Tests provide layers that record the insert and return a chosen rate-limit result. No module-level mutable request state.
 
@@ -269,4 +271,10 @@ Each step is committed only after its check passes. Later steps do not start on 
 
 ## Review notes
 
-This section starts empty. The review pass appends what changed and what was declined.
+Claude Opus 5.5 was not called. A local subagent launch with model `claude-opus-5-5-xhigh` returned `On-demand usage is required. Enable on-demand usage to continue using Cloud Agents.` A second launch with `generalPurpose` failed the same way. No substitute model reviewed the plan.
+
+Author corrections after that failure, before implementation:
+
+- The insert names `private_life.items` and builds each JSONEachRow line with `JSON.stringify`.
+- The README must tell Cal that ClickHouse Cloud cannot use an IP allowlist for this Worker, because Workers have no stable egress range.
+- Application packages pin Effect `3.22.2`. Alchemy `2.0.0-beta.83` peers Effect `^4.0.0`, so `infra/` depends on Effect 4 and does not import the Worker. The Worker stays on Effect 3.

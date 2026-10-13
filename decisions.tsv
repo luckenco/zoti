@@ -1,0 +1,4 @@
+ts	phase	decision	why	evidence	result
+2026-10-13T11:02:00Z	frame	wrote the plan before code and defined done as typecheck, tests, the items DDL, one shared schema, and an Alchemy file that is not deployed	the work is a multi-part scaffold and a wrong contract is expensive to unwind	PLAN.md	open
+2026-10-13T11:05:00Z	review	skipped the Opus review because the subagent launcher refused	both launches returned On-demand usage is required	PLAN.md review notes	skipped
+2026-10-13T11:06:00Z	review	kept Effect 3.22.2 in the apps and put Effect 4 only in infra	Alchemy 2.0.0-beta.83 peers Effect 4, and the request asked for Effect 3 application code	PLAN.md review notes	open
