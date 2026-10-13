@@ -4,13 +4,14 @@ import { Effect, Layer } from "effect"
 import { authLayer, type Identity } from "./auth"
 import { authorize, IdSource } from "./handler"
 import { workerFetch } from "./index"
-import { addItem, recentItems, searchItems } from "./mcp-tools"
+import { addItem, markConsumedItems, recentItems, searchItems } from "./mcp-tools"
 import { motherDuckLayer, type SqlSession } from "./motherduck"
 import { rateLimitLayer, type RateLimitBinding } from "./rate-limit"
-import { insertRecords, recentRecords, searchRecords, type SqlStatement } from "./sql"
+import { insertRecords, markConsumed, recentRecords, searchRecords, type SqlStatement } from "./sql"
 
 const fixedId = "22222222-2222-4222-8222-222222222222"
 const knownId = "0f8fad5b-d9cb-469f-a165-70867728950e"
+const secondId = "11111111-1111-4111-8111-111111111111"
 const mcpUrl = "https://herodotus-ingress.cloudflare-swimming382.workers.dev/mcp"
 const grokbot: Identity = { name: "grokbot", actor: "agent" }
 const tokens = JSON.stringify({
@@ -95,6 +96,7 @@ describe("mcp tools", () => {
         },
       ])
       assert.equal(sent.text, expected.text)
+      assert.equal(sent.text.includes("consumed_at"), false)
       assert.deepEqual(sent.values, expected.values)
       assert.deepEqual(closed, ["closed"])
     }),
@@ -164,6 +166,7 @@ describe("mcp tools", () => {
         from: "2026-10-01T00:00:00.000Z",
         to: "2026-10-13T00:00:00.000Z",
         limit: 100,
+        unread: false,
       })
       assert.equal(sent.text, expected.text)
       assert.deepEqual(sent.values, expected.values)
@@ -186,6 +189,7 @@ describe("mcp tools", () => {
             text: "the selected passage",
             tags: ["reading"],
             ts: "2026-10-13T10:52:00.000Z",
+            consumedAt: null,
           },
         ],
       })
@@ -206,6 +210,7 @@ describe("mcp tools", () => {
           from: null,
           to: null,
           limit: 20,
+          unread: false,
         }).values,
       )
       yield* recentItems({}).pipe(Effect.provide(layer))
@@ -234,6 +239,59 @@ describe("mcp tools", () => {
       assert.equal(result.isError, true)
       assert.equal(textOf(result), "store failed")
       assert.deepEqual(closed, ["closed"])
+    }),
+  )
+
+  it.effect("marks ids consumed and can clear them", () =>
+    Effect.gen(function* () {
+      const { recorded, layer } = harness([{ id: knownId }])
+      const marked = yield* markConsumedItems({ ids: [knownId] }).pipe(Effect.provide(layer))
+      assert.equal(textOf(marked), JSON.stringify({ consumed: true, ids: [knownId] }))
+      assert.deepEqual(recorded[0], markConsumed("herodotus", [knownId], true))
+      yield* markConsumedItems({ ids: [knownId, secondId], consumed: false }).pipe(Effect.provide(layer))
+      assert.deepEqual(recorded[1], markConsumed("herodotus", [knownId, secondId], false))
+      assert.equal(recorded[0]?.text.includes(knownId), false)
+    }),
+  )
+
+  it.effect("rejects a bad consumed id list before opening the database", () =>
+    Effect.gen(function* () {
+      const { recorded, closed, layer } = harness()
+      const empty = yield* markConsumedItems({ ids: [] }).pipe(Effect.provide(layer))
+      const tooMany = yield* markConsumedItems({
+        ids: Array.from({ length: 101 }, () => knownId),
+      }).pipe(Effect.provide(layer))
+      const bad = yield* markConsumedItems({ ids: ["not-a-uuid"] }).pipe(Effect.provide(layer))
+      const injected = yield* markConsumedItems({ ids: [knownId], sql: "update records set text = ''" }).pipe(
+        Effect.provide(layer),
+      )
+      assert.equal(empty.isError, true)
+      assert.equal(tooMany.isError, true)
+      assert.equal(bad.isError, true)
+      assert.equal(injected.isError, true)
+      assert.equal(recorded.length, 0)
+      assert.deepEqual(closed, [])
+    }),
+  )
+
+  it.effect("filters unread records with consumed_at IS NULL", () =>
+    Effect.gen(function* () {
+      const { recorded, layer } = harness([])
+      yield* searchItems({ unread: true, limit: 5 }).pipe(Effect.provide(layer))
+      const expected = searchRecords("herodotus", {
+        text: null,
+        tag: null,
+        via: null,
+        kind: null,
+        from: null,
+        to: null,
+        limit: 5,
+        unread: true,
+      })
+      assert.deepEqual(recorded[0], expected)
+      assert.equal(expected.text.includes("consumed_at IS NULL"), true)
+      yield* recentItems({ unread: true, limit: 5 }).pipe(Effect.provide(layer))
+      assert.deepEqual(recorded[1], recentRecords("herodotus", 5, true))
     }),
   )
 })
@@ -309,7 +367,7 @@ describe("mcp endpoint", () => {
       }
       assert.deepEqual(
         listed.result.tools.map((tool) => tool.name),
-        ["add_item", "search_items", "recent_items"],
+        ["add_item", "search_items", "recent_items", "mark_consumed"],
       )
     }),
   )

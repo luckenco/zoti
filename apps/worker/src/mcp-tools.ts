@@ -1,6 +1,7 @@
 import {
   InvalidBody,
   Misconfigured,
+  RecordId,
   RecordInput,
   StoreWriteFailed,
   maxKindLength,
@@ -47,12 +48,21 @@ export const searchItemsInput = z
     from: z.string().optional(),
     to: z.string().optional(),
     limit: limit.optional(),
+    unread: z.boolean().optional(),
   })
   .strict()
 
 export const recentItemsInput = z
   .object({
     limit: limit.optional(),
+    unread: z.boolean().optional(),
+  })
+  .strict()
+
+export const markConsumedInput = z
+  .object({
+    ids: z.array(z.string()).min(1).max(100),
+    consumed: z.boolean().optional(),
   })
   .strict()
 
@@ -60,10 +70,13 @@ export const addItemDescription =
   "Upsert one record, the same fields as POST /v1/records. kind is the type. via is the source. tags and ts are required. Provide text or url. Omit id to create; send the same id and ts to update. actor and agent are stamped from the bearer token."
 
 export const searchItemsDescription =
-  "Find records whose text contains a substring, case-insensitively. Optional exact filters: tag, source (via), type (kind), and an inclusive UTC timestamp range (from, to) on ts. limit defaults to 20 and cannot exceed 100. Newest first."
+  "Find records whose text contains a substring, case-insensitively. Optional exact filters: tag, source (via), type (kind), and an inclusive UTC timestamp range (from, to) on ts. unread true keeps only records with consumed_at null. limit defaults to 20 and cannot exceed 100. Newest first. Results include consumedAt."
 
 export const recentItemsDescription =
-  "Return the newest records. limit defaults to 20 and cannot exceed 100."
+  "Return the newest records. unread true keeps only records with consumed_at null. limit defaults to 20 and cannot exceed 100. Results include consumedAt."
+
+export const markConsumedDescription =
+  "Set consumed_at to now, or clear it. ids holds 1 to 100 record ids. consumed defaults to true; pass false to mark them unread. Re-ingesting a record does not change consumed_at."
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -132,6 +145,7 @@ export const searchItems = (input: unknown): Effect.Effect<CallToolResult, never
       from,
       to,
       limit: parsed.data.limit ?? defaultReadLimit,
+      unread: parsed.data.unread ?? false,
     })
     return toolText({ records })
   }).pipe(Effect.catchAll((error) => Effect.succeed(toolFailure(error))))
@@ -141,6 +155,19 @@ export const recentItems = (input: unknown): Effect.Effect<CallToolResult, never
     const parsed = recentItemsInput.safeParse(input ?? {})
     if (!parsed.success) return zodError(parsed.error)
     const store = yield* ItemStore
-    const records = yield* store.recent(parsed.data.limit ?? defaultReadLimit)
+    const records = yield* store.recent(parsed.data.limit ?? defaultReadLimit, parsed.data.unread ?? false)
     return toolText({ records })
+  }).pipe(Effect.catchAll((error) => Effect.succeed(toolFailure(error))))
+
+export const markConsumedItems = (input: unknown): Effect.Effect<CallToolResult, never, ItemStore> =>
+  Effect.gen(function* () {
+    const parsed = markConsumedInput.safeParse(input)
+    if (!parsed.success) return zodError(parsed.error)
+    const ids = yield* Schema.decodeUnknown(Schema.Array(RecordId))(parsed.data.ids).pipe(
+      Effect.mapError((error) => new InvalidBody({ message: TreeFormatter.formatErrorSync(error) })),
+    )
+    const consumed = parsed.data.consumed ?? true
+    const store = yield* ItemStore
+    const updated = yield* store.markConsumed(ids, consumed)
+    return toolText({ consumed, ids: updated })
   }).pipe(Effect.catchAll((error) => Effect.succeed(toolFailure(error))))

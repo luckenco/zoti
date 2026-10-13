@@ -19,7 +19,7 @@ bun run extension:build
 
 ## Database and secrets
 
-Create a [MotherDuck](https://motherduck.com) database named `herodotus` and run `duckdb/migrations/001_records.sql` while connected to it. Create a read/write access token. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization.
+Create a [MotherDuck](https://motherduck.com) database named `herodotus` and run `duckdb/migrations/001_records.sql` while connected to it, then `duckdb/migrations/002_consumed_at.sql`. On a database that already has the table, run only `002_consumed_at.sql`. It adds a nullable `consumed_at` and is safe to re-run. Create a read/write access token. Use `pg.us-east-1-aws.motherduck.com` for a US organization, or `pg.eu-central-1-aws.motherduck.com` for an EU organization.
 
 For deployment, put these in gitignored `infra/.env` (mode `0600`):
 
@@ -53,8 +53,11 @@ The Worker stamps `actor` and `agent` from the token. Requests that set either a
 `https://herodotus-ingress.cloudflare-swimming382.workers.dev/mcp` speaks stateless streamable HTTP. Send `Authorization: Bearer <token>`.
 
 - `add_item` upserts one record with the same fields as `POST /v1/records`. `kind` is the type. `via` is the source.
-- `search_items` filters by text contains, `tag`, `source` (`via`), `type` (`kind`), and an inclusive `from`/`to` range on `ts`. `limit` defaults to 20 and cannot exceed 100.
-- `recent_items` returns the newest records, with the same limit.
+- `search_items` filters by text contains, `tag`, `source` (`via`), `type` (`kind`), an inclusive `from`/`to` range on `ts`, and `unread` (`consumed_at` is null). `limit` defaults to 20 and cannot exceed 100.
+- `recent_items` returns the newest records, with the same limit and `unread` filter.
+- `mark_consumed` sets `consumed_at` to now for up to 100 ids. `consumed` defaults to true; pass false to clear it.
+
+Reads include `consumedAt`. Upserting the same id does not change `consumed_at`. Run `002_consumed_at.sql` before deploying this Worker.
 
 `grokbot` in `AUTH_TOKENS` above is that client: its own token, `"actor":"agent"`. Copy the same JSON into `apps/worker/.dev.vars` for local `wrangler dev`. Redeploy from `infra` with `bun run alchemy deploy --stage prod` so the Worker secret updates.
 

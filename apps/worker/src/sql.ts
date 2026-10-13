@@ -16,7 +16,7 @@ export interface SettledRow {
   readonly raw: string
 }
 
-export type SqlValue = string | number | null | ReadonlyArray<string>
+export type SqlValue = string | number | boolean | null | ReadonlyArray<string>
 
 export interface SqlStatement {
   readonly text: string
@@ -81,6 +81,7 @@ export interface RecordSearch {
   readonly from: string | null
   readonly to: string | null
   readonly limit: number
+  readonly unread: boolean
 }
 
 const selectedColumns = [
@@ -98,6 +99,7 @@ const selectedColumns = [
   "text",
   "to_json(tags) AS tags",
   "ts",
+  "consumed_at",
 ].join(", ")
 
 const absent = (value: string | null): string | null => (value === null || value.length === 0 ? null : value)
@@ -119,6 +121,7 @@ export const searchRecords = (database: string, query: RecordSearch): SqlStateme
     "AND ($4 IS NULL OR kind = $4)",
     "AND ($5 IS NULL OR ts >= CAST($5 AS TIMESTAMPTZ))",
     "AND ($6 IS NULL OR ts <= CAST($6 AS TIMESTAMPTZ))",
+    "AND (NOT $8 OR consumed_at IS NULL)",
     "ORDER BY ts DESC",
     "LIMIT $7",
   ].join(" "),
@@ -130,13 +133,22 @@ export const searchRecords = (database: string, query: RecordSearch): SqlStateme
     absent(query.from),
     absent(query.to),
     limitValue(query.limit),
+    query.unread,
   ],
 })
 
-export const recentRecords = (database: string, limit: number): SqlStatement => ({
-  text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records ORDER BY ts DESC LIMIT $1`,
-  values: [limitValue(limit)],
+export const recentRecords = (database: string, limit: number, unread = false): SqlStatement => ({
+  text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records WHERE (NOT $1 OR consumed_at IS NULL) ORDER BY ts DESC LIMIT $2`,
+  values: [unread, limitValue(limit)],
 })
+
+export const markConsumed = (database: string, ids: ReadonlyArray<string>, consumed: boolean): SqlStatement => {
+  if (ids.length < 1 || ids.length > maxReadLimit) throw new Error("ids must contain 1 to 100 values")
+  return {
+    text: `UPDATE ${databaseName(database)}.records SET consumed_at = CASE WHEN $1 THEN now() ELSE NULL END WHERE list_contains($2, id::VARCHAR) RETURNING id::VARCHAR AS id`,
+    values: [consumed, [...ids]],
+  }
+}
 
 export const insertRecords = (database: string, rows: ReadonlyArray<SettledRow>): SqlStatement => {
   const name = databaseName(database)

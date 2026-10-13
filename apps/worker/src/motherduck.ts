@@ -4,6 +4,7 @@ import { Client } from "pg"
 import {
   identifier,
   insertRecords,
+  markConsumed,
   recentRecords,
   searchRecords,
   type RecordSearch,
@@ -26,6 +27,7 @@ export interface RecordView {
   readonly text: string
   readonly tags: ReadonlyArray<string>
   readonly ts: string
+  readonly consumedAt: string | null
 }
 
 export class ItemStore extends Context.Tag("ItemStore")<
@@ -39,7 +41,12 @@ export class ItemStore extends Context.Tag("ItemStore")<
     ) => Effect.Effect<ReadonlyArray<RecordView>, StoreWriteFailed | Misconfigured>
     readonly recent: (
       limit: number,
+      unread: boolean,
     ) => Effect.Effect<ReadonlyArray<RecordView>, StoreWriteFailed | Misconfigured>
+    readonly markConsumed: (
+      ids: ReadonlyArray<string>,
+      consumed: boolean,
+    ) => Effect.Effect<ReadonlyArray<string>, StoreWriteFailed | Misconfigured>
   }
 >() {}
 
@@ -161,10 +168,14 @@ const recordView = (row: Record<string, unknown>): RecordView => ({
   text: textOf(row.text, true),
   tags: tagsOf(row.tags),
   ts: timestamp(row.ts),
+  consumedAt: nullableString(row.consumed_at),
 })
 
 const recordsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<RecordView> =>
   rows.map(recordView)
+
+const idsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<string> =>
+  rows.map((row) => textOf(row.id))
 
 const withSession = <A>(
   config: MotherDuckConfig,
@@ -205,7 +216,13 @@ export const motherDuckLayer = (config: MotherDuckConfig): Layer.Layer<ItemStore
             ),
       search: (query) =>
         withSession(config, (session, database) => session.query(searchRecords(database, query)).then(recordsOf)),
-      recent: (limit) =>
-        withSession(config, (session, database) => session.query(recentRecords(database, limit)).then(recordsOf)),
+      recent: (limit, unread) =>
+        withSession(config, (session, database) =>
+          session.query(recentRecords(database, limit, unread)).then(recordsOf),
+        ),
+      markConsumed: (ids, consumed) =>
+        withSession(config, (session, database) =>
+          session.query(markConsumed(database, ids, consumed)).then(idsOf),
+        ),
     })),
   )

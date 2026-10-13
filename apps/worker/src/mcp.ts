@@ -8,6 +8,9 @@ import {
   addItem,
   addItemDescription,
   addItemInput,
+  markConsumedDescription,
+  markConsumedInput,
+  markConsumedItems,
   recentItems,
   recentItemsDescription,
   recentItemsInput,
@@ -44,6 +47,11 @@ const createServer = (env: WorkerBindings, identity: Identity | null): McpServer
     "recent_items",
     { description: recentItemsDescription, inputSchema: recentItemsInput },
     (args) => run(recentItems(args)),
+  )
+  server.registerTool(
+    "mark_consumed",
+    { description: markConsumedDescription, inputSchema: markConsumedInput },
+    (args) => run(markConsumedItems(args)),
   )
   return server
 }

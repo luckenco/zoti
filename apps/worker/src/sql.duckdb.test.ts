@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { insertRecords, recentRecords, searchRecords, type SqlStatement, type SqlValue } from "./sql"
+import { insertRecords, markConsumed, recentRecords, searchRecords, type SqlStatement, type SqlValue } from "./sql"
 
 const knownId = "0f8fad5b-d9cb-469f-a165-70867728950e"
 const secondId = "11111111-1111-4111-8111-111111111111"
@@ -14,14 +14,14 @@ const quote = (value: string): string => `'${value.replaceAll("'", "''")}'`
 const literal = (value: SqlValue): string => {
   if (value === null) return "NULL"
   if (typeof value === "number") return String(value)
+  if (typeof value === "boolean") return value ? "true" : "false"
   if (typeof value !== "string") return `[${value.map((item) => quote(item)).join(", ")}]`
   return quote(value)
 }
 
-const migration = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "../../../duckdb/migrations/001_records.sql"),
-  "utf8",
-)
+const migrationDir = join(dirname(fileURLToPath(import.meta.url)), "../../../duckdb/migrations")
+const migration = readFileSync(join(migrationDir, "001_records.sql"), "utf8")
+const withConsumed = `${migration}\n${readFileSync(join(migrationDir, "002_consumed_at.sql"), "utf8")}`
 
 describe("records sql on duckdb", () => {
   it("keeps one row per id", () => {
@@ -165,7 +165,7 @@ describe("records sql on duckdb", () => {
       const script = [
         "ATTACH ':memory:' AS herodotus;",
         "USE herodotus;",
-        migration,
+        withConsumed,
         `PREPARE batch AS ${batch.text};`,
         `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
         `PREPARE ${name} AS ${statement.text};`,
@@ -178,11 +178,11 @@ describe("records sql on duckdb", () => {
     }
     const ids = (statement: SqlStatement) => run(statement).map((row) => row.id)
     assert.deepEqual(
-      ids(searchRecords("herodotus", { text: "PASSAGE", tag: null, via: null, kind: null, from: null, to: null, limit: 100 })),
+      ids(searchRecords("herodotus", { text: "PASSAGE", tag: null, via: null, kind: null, from: null, to: null, limit: 100, unread: false })),
       [knownId],
     )
     assert.deepEqual(
-      ids(searchRecords("herodotus", { text: null, tag: "reading", via: "chrome", kind: "video", from: null, to: null, limit: 100 })),
+      ids(searchRecords("herodotus", { text: null, tag: "reading", via: "chrome", kind: "video", from: null, to: null, limit: 100, unread: false })),
       [knownId],
     )
     assert.deepEqual(
@@ -194,13 +194,13 @@ describe("records sql on duckdb", () => {
           kind: null,
           from: "2026-10-14T00:00:00.000Z",
           to: null,
-          limit: 100,
+          limit: 100, unread: false,
         }),
       ),
       [secondId],
     )
     assert.deepEqual(
-      ids(searchRecords("herodotus", { text: "", tag: null, via: null, kind: null, from: null, to: null, limit: 1 })),
+      ids(searchRecords("herodotus", { text: "", tag: null, via: null, kind: null, from: null, to: null, limit: 1, unread: false })),
       [secondId],
     )
     assert.deepEqual(ids(recentRecords("herodotus", 1)), [secondId])
@@ -213,8 +213,111 @@ describe("records sql on duckdb", () => {
       from: null,
       to: null,
       limit: 20,
+      unread: false,
     })
     assert.equal(injected.text.includes(payload), false)
     assert.deepEqual(ids(injected), [])
+  })
+
+  it("keeps consumed_at when the same id is upserted", () => {
+    const row = {
+      id: knownId,
+      kind: "note",
+      via: "chrome",
+      actor: "human",
+      agent: null,
+      url: null,
+      title: null,
+      author: null,
+      site: null,
+      published_at: null,
+      about_id: null,
+      text: "first",
+      tags: ["reading"],
+      ts: "2026-10-13T10:52:00.000Z",
+      raw: "{}",
+    }
+    const other = { ...row, id: secondId, text: "second", ts: "2026-10-14T10:52:00.000Z" }
+    const batch = insertRecords("herodotus", [row, other])
+    const again = insertRecords("herodotus", [{ ...row, text: "revised" }])
+    const marked = markConsumed("herodotus", [knownId], true)
+    const cleared = markConsumed("herodotus", [knownId], false)
+    const unread = searchRecords("herodotus", {
+      text: null,
+      tag: null,
+      via: null,
+      kind: null,
+      from: null,
+      to: null,
+      limit: 100,
+      unread: true,
+    })
+    const script = [
+      "ATTACH ':memory:' AS herodotus;",
+      "USE herodotus;",
+      withConsumed,
+      withConsumed,
+      `PREPARE batch AS ${batch.text};`,
+      `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
+      `PREPARE mark AS ${marked.text};`,
+      `EXECUTE mark(${marked.values.map((value) => literal(value)).join(", ")});`,
+      `CREATE TABLE snap AS SELECT epoch_ms(consumed_at) AS consumed_ms FROM herodotus.records WHERE id = '${knownId}';`,
+      `PREPARE again AS ${again.text};`,
+      `EXECUTE again(${again.values.map((value) => literal(value)).join(", ")});`,
+      `SELECT id::VARCHAR AS id, text, consumed_at IS NOT NULL AS marked, epoch_ms(consumed_at) = (SELECT consumed_ms FROM snap) AS kept FROM herodotus.records WHERE id = '${knownId}';`,
+    ].join("\n")
+    const lastJson = (stdout: string): unknown => {
+      const values: Array<unknown> = []
+      let start = -1
+      let depth = 0
+      let inString = false
+      let escaped = false
+      for (let index = 0; index < stdout.length; index++) {
+        const char = stdout[index]
+        if (inString) {
+          if (escaped) escaped = false
+          else if (char === "\\") escaped = true
+          else if (char === '"') inString = false
+          continue
+        }
+        if (char === '"') inString = true
+        else if (char === "[" || char === "{") {
+          if (depth === 0) start = index
+          depth += 1
+        } else if (char === "]" || char === "}") {
+          depth -= 1
+          if (depth === 0 && start >= 0) {
+            values.push(JSON.parse(stdout.slice(start, index + 1)))
+            start = -1
+          }
+        }
+      }
+      const last = values.at(-1)
+      assert.ok(last)
+      return last
+    }
+    const kept = spawnSync("duckdb", ["-json", ":memory:"], { input: script, encoding: "utf8" })
+    assert.equal(kept.status, 0, kept.stderr)
+    assert.deepEqual(lastJson(kept.stdout), [{ id: knownId, text: "revised", marked: true, kept: true }])
+    const afterClear = [
+      "ATTACH ':memory:' AS herodotus;",
+      "USE herodotus;",
+      withConsumed,
+      `PREPARE batch AS ${batch.text};`,
+      `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
+      `PREPARE mark AS ${marked.text};`,
+      `EXECUTE mark(${marked.values.map((value) => literal(value)).join(", ")});`,
+      `PREPARE clear AS ${cleared.text};`,
+      `EXECUTE clear(${cleared.values.map((value) => literal(value)).join(", ")});`,
+      `PREPARE unread AS ${unread.text};`,
+      `EXECUTE unread(${unread.values.map((value) => literal(value)).join(", ")});`,
+    ].join("\n")
+    const result = spawnSync("duckdb", ["-json", ":memory:"], { input: afterClear, encoding: "utf8" })
+    assert.equal(result.status, 0, result.stderr)
+    const rows = lastJson(result.stdout) as ReadonlyArray<{ id: string }>
+    assert.deepEqual(
+      rows.map((item) => item.id).sort(),
+      [knownId, secondId].sort(),
+    )
   })
 })
