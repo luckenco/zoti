@@ -115,15 +115,15 @@ export const searchRecords = (database: string, query: RecordSearch): SqlStateme
   text: [
     `SELECT ${selectedColumns}`,
     `FROM ${databaseName(database)}.records`,
-    "WHERE ($1 IS NULL OR contains(lower(text), lower($1)))",
-    "AND ($2 IS NULL OR list_contains(tags, $2))",
-    "AND ($3 IS NULL OR via = $3)",
-    "AND ($4 IS NULL OR kind = $4)",
-    "AND ($5 IS NULL OR ts >= CAST($5 AS TIMESTAMPTZ))",
-    "AND ($6 IS NULL OR ts <= CAST($6 AS TIMESTAMPTZ))",
-    "AND (NOT $8 OR consumed_at IS NULL)",
+    "WHERE ($1::VARCHAR IS NULL OR contains(lower(text), lower($1::VARCHAR)))",
+    "AND ($2::VARCHAR IS NULL OR list_contains(tags, $2::VARCHAR))",
+    "AND ($3::VARCHAR IS NULL OR via = $3::VARCHAR)",
+    "AND ($4::VARCHAR IS NULL OR kind = $4::VARCHAR)",
+    "AND ($5::TIMESTAMPTZ IS NULL OR ts >= $5::TIMESTAMPTZ)",
+    "AND ($6::TIMESTAMPTZ IS NULL OR ts <= $6::TIMESTAMPTZ)",
+    "AND (NOT $8::BOOLEAN OR consumed_at IS NULL)",
     "ORDER BY ts DESC",
-    "LIMIT $7",
+    "LIMIT $7::INTEGER",
   ].join(" "),
   values: [
     absent(query.text),
@@ -138,14 +138,14 @@ export const searchRecords = (database: string, query: RecordSearch): SqlStateme
 })
 
 export const recentRecords = (database: string, limit: number, unread = false): SqlStatement => ({
-  text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records WHERE (NOT $1 OR consumed_at IS NULL) ORDER BY ts DESC LIMIT $2`,
+  text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records WHERE (NOT $1::BOOLEAN OR consumed_at IS NULL) ORDER BY ts DESC LIMIT $2::INTEGER`,
   values: [unread, limitValue(limit)],
 })
 
 export const markConsumed = (database: string, ids: ReadonlyArray<string>, consumed: boolean): SqlStatement => {
   if (ids.length < 1 || ids.length > maxReadLimit) throw new Error("ids must contain 1 to 100 values")
   return {
-    text: `UPDATE ${databaseName(database)}.records SET consumed_at = CASE WHEN $1 THEN now() ELSE NULL END WHERE list_contains($2, id::VARCHAR) RETURNING id::VARCHAR AS id`,
+    text: `UPDATE ${databaseName(database)}.records SET consumed_at = CASE WHEN $1::BOOLEAN THEN now() ELSE NULL END WHERE list_contains($2::VARCHAR[], id::VARCHAR) RETURNING id::VARCHAR AS id`,
     values: [consumed, [...ids]],
   }
 }

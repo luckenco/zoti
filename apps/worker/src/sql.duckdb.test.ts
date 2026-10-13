@@ -19,6 +19,37 @@ const literal = (value: SqlValue): string => {
   return quote(value)
 }
 
+const lastJson = (stdout: string): unknown => {
+  const values: Array<unknown> = []
+  let start = -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < stdout.length; index++) {
+    const char = stdout[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === "\\") escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') inString = true
+    else if (char === "[" || char === "{") {
+      if (depth === 0) start = index
+      depth += 1
+    } else if (char === "]" || char === "}") {
+      depth -= 1
+      if (depth === 0 && start >= 0) {
+        values.push(JSON.parse(stdout.slice(start, index + 1)))
+        start = -1
+      }
+    }
+  }
+  const last = values.at(-1)
+  assert.ok(last)
+  return last
+}
+
 const migrationDir = join(dirname(fileURLToPath(import.meta.url)), "../../../duckdb/migrations")
 const migration = readFileSync(join(migrationDir, "001_records.sql"), "utf8")
 const withConsumed = `${migration}\n${readFileSync(join(migrationDir, "002_consumed_at.sql"), "utf8")}`
@@ -266,36 +297,6 @@ describe("records sql on duckdb", () => {
       `EXECUTE again(${again.values.map((value) => literal(value)).join(", ")});`,
       `SELECT id::VARCHAR AS id, text, consumed_at IS NOT NULL AS marked, epoch_ms(consumed_at) = (SELECT consumed_ms FROM snap) AS kept FROM herodotus.records WHERE id = '${knownId}';`,
     ].join("\n")
-    const lastJson = (stdout: string): unknown => {
-      const values: Array<unknown> = []
-      let start = -1
-      let depth = 0
-      let inString = false
-      let escaped = false
-      for (let index = 0; index < stdout.length; index++) {
-        const char = stdout[index]
-        if (inString) {
-          if (escaped) escaped = false
-          else if (char === "\\") escaped = true
-          else if (char === '"') inString = false
-          continue
-        }
-        if (char === '"') inString = true
-        else if (char === "[" || char === "{") {
-          if (depth === 0) start = index
-          depth += 1
-        } else if (char === "]" || char === "}") {
-          depth -= 1
-          if (depth === 0 && start >= 0) {
-            values.push(JSON.parse(stdout.slice(start, index + 1)))
-            start = -1
-          }
-        }
-      }
-      const last = values.at(-1)
-      assert.ok(last)
-      return last
-    }
     const kept = spawnSync("duckdb", ["-json", ":memory:"], { input: script, encoding: "utf8" })
     assert.equal(kept.status, 0, kept.stderr)
     assert.deepEqual(lastJson(kept.stdout), [{ id: knownId, text: "revised", marked: true, kept: true }])
@@ -319,5 +320,83 @@ describe("records sql on duckdb", () => {
       rows.map((item) => item.id).sort(),
       [knownId, secondId].sort(),
     )
+  })
+
+  it("runs the typed search statement MotherDuck prepares", () => {
+    const passage = {
+      id: knownId,
+      kind: "video",
+      via: "chrome",
+      actor: "human",
+      agent: null,
+      url: null,
+      title: null,
+      author: null,
+      site: null,
+      published_at: null,
+      about_id: null,
+      text: "the selected passage",
+      tags: ["reading"],
+      ts: "2026-10-13T10:52:00.000Z",
+      raw: "{}",
+    }
+    const other = {
+      ...passage,
+      id: secondId,
+      kind: "note",
+      via: "cli",
+      text: "other note",
+      tags: ["etl"],
+      ts: "2026-10-14T10:52:00.000Z",
+    }
+    const batch = insertRecords("herodotus", [passage, other])
+    const marked = markConsumed("herodotus", [secondId], true)
+    const textOnly = searchRecords("herodotus", {
+      text: "PASSAGE",
+      tag: null,
+      via: null,
+      kind: null,
+      from: null,
+      to: null,
+      limit: 20,
+      unread: false,
+    })
+    const filtered = searchRecords("herodotus", {
+      text: null,
+      tag: null,
+      via: "chrome",
+      kind: null,
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-10-31T00:00:00.000Z",
+      limit: 20,
+      unread: true,
+    })
+    for (const statement of [textOnly, filtered]) {
+      assert.equal(statement.text.includes("$1 IS NULL"), false)
+      assert.equal(statement.text.includes("$1::VARCHAR IS NULL"), true)
+      assert.equal(statement.text.includes("$5::TIMESTAMPTZ IS NULL"), true)
+      assert.equal(statement.text.includes("NOT $8::BOOLEAN"), true)
+      assert.equal(statement.values.includes(null), true)
+    }
+    const run = (statement: SqlStatement) => {
+      const script = [
+        "ATTACH ':memory:' AS herodotus;",
+        "USE herodotus;",
+        withConsumed,
+        `PREPARE batch AS ${batch.text};`,
+        `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
+        `PREPARE mark AS ${marked.text};`,
+        `EXECUTE mark(${marked.values.map((value) => literal(value)).join(", ")});`,
+        `PREPARE search AS ${statement.text};`,
+        `EXECUTE search(${statement.values.map((value) => literal(value)).join(", ")});`,
+      ].join("\n")
+      const result = spawnSync("duckdb", ["-json", ":memory:"], { input: script, encoding: "utf8" })
+      assert.equal(result.status, 0, result.stderr)
+      const last = lastJson(result.stdout)
+      assert.ok(Array.isArray(last))
+      return last.map((row) => (row as { id: string }).id)
+    }
+    assert.deepEqual(run(textOnly), [knownId])
+    assert.deepEqual(run(filtered), [knownId])
   })
 })
