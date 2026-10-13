@@ -32,22 +32,19 @@ MOTHERDUCK_TOKEN='<read-write token>'
 
 Tokens must be distinct. Alchemy uploads these values as Worker secrets. For local development, copy `apps/worker/.dev.vars.example` to gitignored `apps/worker/.dev.vars`, fill it in, and run `bun run --filter @herodotus/worker dev`.
 
-Authenticate Alchemy with the intended Cloudflare account. Deployment state is remote. From `infra`, once, import the existing Worker into that store and confirm the prompt to deploy the state store:
+GitHub is the source repository. Origin mirrors it. Pushes to `main` deploy production (`bun run alchemy deploy --stage prod` from `infra`) through GitHub Actions. The Worker is `herodotus-ingress`. Deployment state is remote.
 
-```sh
-cd infra
-bun run alchemy deploy --stage prod --adopt
-```
-
-Later deploys omit `--adopt`:
+To deploy by hand, authenticate Alchemy with the Cloudflare account, then from `infra`:
 
 ```sh
 bun run alchemy deploy --stage prod
 ```
 
-The Worker is `herodotus-ingress`. Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (60 requests per minute per identity, per Cloudflare location).
+Verify both `/health` and a real insert. Test a burst of authenticated POSTs to confirm the rate limiter returns 429 (60 requests per minute per identity, per Cloudflare location).
 
-Pushes to `main` deploy `--stage prod`. Create the private GitHub repository, add `GITHUB_OWNER` and `GITHUB_REPOSITORY` to `infra/.env`, and create an `admin` profile with an API token or Global API Key that has Account API Tokens Write (not OAuth). That run also needs GitHub auth that can write Actions secrets. Then, from `infra`:
+### New account setup
+
+On a new Cloudflare account, import the Worker once from `infra` with `bun run alchemy deploy --stage prod --adopt` and confirm the prompt to deploy the state store. To write Actions secrets, add `GITHUB_OWNER` and `GITHUB_REPOSITORY` to `infra/.env`, create an `admin` Alchemy profile with an API token or Global API Key that has Account API Tokens Write (not OAuth), and authenticate GitHub so it can write Actions secrets. From `infra`:
 
 ```sh
 bun run alchemy profile create admin
@@ -68,7 +65,7 @@ The Worker stamps `actor` and `agent` from the token. Requests that set either a
 `https://herodotus-ingress.cloudflare-swimming382.workers.dev/mcp` speaks stateless streamable HTTP. Send `Authorization: Bearer <token>`.
 
 - `add_item` upserts one record with the same fields as `POST /v1/records`. `kind` is the type. `via` is the source.
-- `search_items` filters by text contains, `tag`, `source` (`via`), `type` (`kind`), an inclusive `from`/`to` range on `ts`, and `unread` (`consumed_at` is null). `limit` defaults to 20 and cannot exceed 100.
+- `search_items` filters by a case-insensitive substring of `text`, `title`, or `url`, plus `tag`, `source` (`via`), `type` (`kind`), an inclusive `from`/`to` range on `ts`, and `unread` (`consumed_at` is null). `limit` defaults to 20 and cannot exceed 100.
 - `recent_items` returns the newest records, with the same limit and `unread` filter.
 - `mark_consumed` sets `consumed_at` to now for up to 100 ids. `consumed` defaults to true; pass false to clear it.
 

@@ -115,7 +115,7 @@ export const searchRecords = (database: string, query: RecordSearch): SqlStateme
   text: [
     `SELECT ${selectedColumns}`,
     `FROM ${databaseName(database)}.records`,
-    "WHERE ($1::VARCHAR IS NULL OR contains(lower(text), lower($1::VARCHAR)))",
+    "WHERE ($1::VARCHAR IS NULL OR contains(lower(text), lower($1::VARCHAR)) OR contains(lower(coalesce(title, '')), lower($1::VARCHAR)) OR contains(lower(coalesce(url, '')), lower($1::VARCHAR)))",
     "AND ($2::VARCHAR IS NULL OR list_contains(tags, $2::VARCHAR))",
     "AND ($3::VARCHAR IS NULL OR via = $3::VARCHAR)",
     "AND ($4::VARCHAR IS NULL OR kind = $4::VARCHAR)",

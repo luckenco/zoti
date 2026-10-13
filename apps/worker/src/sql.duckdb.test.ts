@@ -399,4 +399,86 @@ describe("records sql on duckdb", () => {
     assert.deepEqual(run(textOnly), [knownId])
     assert.deepEqual(run(filtered), [knownId])
   })
+
+  it("matches the text filter against title and url", () => {
+    const titled = {
+      id: knownId,
+      kind: "video",
+      via: "chrome",
+      actor: "human",
+      agent: null,
+      url: null,
+      title: "Quarterly Review",
+      author: null,
+      site: null,
+      published_at: null,
+      about_id: null,
+      text: "no keywords here",
+      tags: ["reading"],
+      ts: "2026-10-13T10:52:00.000Z",
+      raw: "{}",
+    }
+    const linked = {
+      ...titled,
+      id: secondId,
+      title: null,
+      url: "https://example.com/Alpha",
+      text: "",
+      ts: "2026-10-14T10:52:00.000Z",
+    }
+    const plainId = "22222222-2222-4222-8222-222222222222"
+    const plain = {
+      ...titled,
+      id: plainId,
+      title: null,
+      url: null,
+      text: "plain body",
+      ts: "2026-10-12T10:52:00.000Z",
+    }
+    const batch = insertRecords("herodotus", [titled, linked, plain])
+    const search = (text: string) =>
+      searchRecords("herodotus", {
+        text,
+        tag: null,
+        via: null,
+        kind: null,
+        from: null,
+        to: null,
+        limit: 20,
+        unread: false,
+      })
+    const byTitle = search("REVIEW")
+    const byUrl = search("alpha")
+    const byText = search("PLAIN")
+    const missing = search("absent")
+    for (const statement of [byTitle, byUrl, byText, missing]) {
+      assert.equal(statement.text.includes("$1::VARCHAR IS NULL"), true)
+      assert.equal(statement.text.includes("lower($1::VARCHAR)"), true)
+      assert.equal(statement.text.includes("$1 IS NULL"), false)
+      assert.equal(statement.text.includes("coalesce(title, '')"), true)
+      assert.equal(statement.text.includes("coalesce(url, '')"), true)
+    }
+    const run = (statement: SqlStatement) => {
+      const script = [
+        "ATTACH ':memory:' AS herodotus;",
+        "USE herodotus;",
+        withConsumed,
+        `PREPARE batch AS ${batch.text};`,
+        `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
+        `PREPARE search AS ${statement.text};`,
+        `EXECUTE search(${statement.values.map((value) => literal(value)).join(", ")});`,
+      ].join("\n")
+      const result = spawnSync("duckdb", ["-json", ":memory:"], { input: script, encoding: "utf8" })
+      assert.equal(result.status, 0, result.stderr)
+      const stdout = result.stdout.trim()
+      if (stdout.length === 0) return []
+      const last = lastJson(stdout)
+      assert.ok(Array.isArray(last))
+      return last.map((row) => (row as { id: string }).id)
+    }
+    assert.deepEqual(run(byTitle), [knownId])
+    assert.deepEqual(run(byUrl), [secondId])
+    assert.deepEqual(run(byText), [plainId])
+    assert.deepEqual(run(missing), [])
+  })
 })

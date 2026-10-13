@@ -70,7 +70,7 @@ export const addItemDescription =
   "Upsert one record, the same fields as POST /v1/records. kind is the type. via is the source. tags and ts are required. Provide text or url. Omit id to create; send the same id and ts to update. actor and agent are stamped from the bearer token."
 
 export const searchItemsDescription =
-  "Find records whose text contains a substring, case-insensitively. Optional exact filters: tag, source (via), type (kind), and an inclusive UTC timestamp range (from, to) on ts. unread true keeps only records with consumed_at null. limit defaults to 20 and cannot exceed 100. Newest first. Results include consumedAt."
+  "Find records where text, title, or url contains a substring, case-insensitively. Optional exact filters: tag, source (via), type (kind), and an inclusive UTC timestamp range (from, to) on ts. unread true keeps only records with consumed_at null. limit defaults to 20 and cannot exceed 100. Newest first. Results include consumedAt."
 
 export const recentItemsDescription =
   "Return the newest records. unread true keeps only records with consumed_at null. limit defaults to 20 and cannot exceed 100. Results include consumedAt."
