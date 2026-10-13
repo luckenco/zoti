@@ -1,0 +1,17 @@
+{
+  "name": "@private-life/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@effect/platform": "0.97.2",
+    "@private-life/schema": "workspace:*",
+    "effect": "3.22.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261013.1",
+    "@effect/vitest": "0.30.0",
+    "vitest": "3.2.6",
+    "wrangler": "4.150.0"
+  }
+}
