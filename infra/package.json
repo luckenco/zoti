@@ -1,0 +1,13 @@
+{
+  "name": "@private-life/infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "alchemy": "2.0.0-beta.83",
+    "effect": "4.0.4"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5"
+  }
+}
