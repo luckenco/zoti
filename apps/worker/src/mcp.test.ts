@@ -316,6 +316,8 @@ describe("mcp endpoint", () => {
       MOTHERDUCK_HOST: "not a host",
       MOTHERDUCK_DATABASE: "herodotus",
       MOTHERDUCK_TOKEN: "test-password",
+      ZOTERO_API_KEY: "test-zotero-key",
+      ZOTERO_USER_ID: "1234567",
       INGEST_RATE_LIMITER: binding(allow, keys),
     }
     return Effect.gen(function* () {

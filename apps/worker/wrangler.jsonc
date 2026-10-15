@@ -9,7 +9,9 @@
       "AUTH_TOKENS",
       "MOTHERDUCK_HOST",
       "MOTHERDUCK_DATABASE",
-      "MOTHERDUCK_TOKEN"
+      "MOTHERDUCK_TOKEN",
+      "ZOTERO_API_KEY",
+      "ZOTERO_USER_ID"
     ]
   },
   "observability": {
