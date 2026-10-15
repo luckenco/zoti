@@ -100,6 +100,8 @@ const selectedColumns = [
   "to_json(tags) AS tags",
   "ts",
   "consumed_at",
+  "zotero_key",
+  "zotero_url",
 ].join(", ")
 
 const absent = (value: string | null): string | null => (value === null || value.length === 0 ? null : value)
@@ -140,6 +142,21 @@ export const searchRecords = (database: string, query: RecordSearch): SqlStateme
 export const recentRecords = (database: string, limit: number, unread = false): SqlStatement => ({
   text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records WHERE (NOT $1::BOOLEAN OR consumed_at IS NULL) ORDER BY ts DESC LIMIT $2::INTEGER`,
   values: [unread, limitValue(limit)],
+})
+
+export const recordById = (database: string, id: string): SqlStatement => ({
+  text: `SELECT ${selectedColumns} FROM ${databaseName(database)}.records WHERE id = $1::UUID`,
+  values: [id],
+})
+
+export const stampZotero = (
+  database: string,
+  id: string,
+  zoteroKey: string,
+  zoteroUrl: string,
+): SqlStatement => ({
+  text: `UPDATE ${databaseName(database)}.records SET zotero_key = $2::VARCHAR, zotero_url = $3::VARCHAR WHERE id = $1::UUID AND zotero_key IS NULL RETURNING zotero_key, zotero_url`,
+  values: [id, zoteroKey, zoteroUrl],
 })
 
 export const markConsumed = (database: string, ids: ReadonlyArray<string>, consumed: boolean): SqlStatement => {

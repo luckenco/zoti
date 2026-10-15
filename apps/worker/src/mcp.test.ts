@@ -190,6 +190,8 @@ describe("mcp tools", () => {
             tags: ["reading"],
             ts: "2026-10-13T10:52:00.000Z",
             consumedAt: null,
+            zoteroKey: null,
+            zoteroUrl: null,
           },
         ],
       })

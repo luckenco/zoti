@@ -52,7 +52,11 @@ const lastJson = (stdout: string): unknown => {
 
 const migrationDir = join(dirname(fileURLToPath(import.meta.url)), "../../../duckdb/migrations")
 const migration = readFileSync(join(migrationDir, "001_records.sql"), "utf8")
-const withConsumed = `${migration}\n${readFileSync(join(migrationDir, "002_consumed_at.sql"), "utf8")}`
+const withConsumed = [
+  migration,
+  readFileSync(join(migrationDir, "002_consumed_at.sql"), "utf8"),
+  readFileSync(join(migrationDir, "003_zotero.sql"), "utf8"),
+].join("\n")
 
 describe("records sql on duckdb", () => {
   it("keeps one row per id", () => {
@@ -480,5 +484,49 @@ describe("records sql on duckdb", () => {
     assert.deepEqual(run(byUrl), [secondId])
     assert.deepEqual(run(byText), [plainId])
     assert.deepEqual(run(missing), [])
+  })
+
+  it("keeps zotero_key and zotero_url when the same id is upserted", () => {
+    const row = {
+      id: knownId,
+      kind: "page",
+      via: "mcp",
+      actor: "agent",
+      agent: "grokbot",
+      url: "https://example.com/post",
+      title: "The post",
+      author: null,
+      site: "example.com",
+      published_at: "2026-10-01T00:00:00.000Z",
+      about_id: null,
+      text: "first",
+      tags: ["reading"],
+      ts: "2026-10-13T10:52:00.000Z",
+      raw: "{}",
+    }
+    const batch = insertRecords("herodotus", [row])
+    const again = insertRecords("herodotus", [{ ...row, text: "revised" }])
+    assert.equal(batch.text.includes("zotero"), false)
+    assert.equal(again.text.includes("zotero"), false)
+    const withZotero = `${withConsumed}\n${readFileSync(join(migrationDir, "003_zotero.sql"), "utf8")}`
+    const linkKey = "ABCD2345"
+    const linkUrl = "https://www.zotero.org/users/1234567/items/ABCD2345"
+    const script = [
+      "ATTACH ':memory:' AS herodotus;",
+      "USE herodotus;",
+      withZotero,
+      withZotero,
+      `PREPARE batch AS ${batch.text};`,
+      `EXECUTE batch(${batch.values.map((value) => literal(value)).join(", ")});`,
+      `UPDATE herodotus.records SET zotero_key = ${quote(linkKey)}, zotero_url = ${quote(linkUrl)} WHERE id = '${knownId}';`,
+      `PREPARE again AS ${again.text};`,
+      `EXECUTE again(${again.values.map((value) => literal(value)).join(", ")});`,
+      `SELECT id::VARCHAR AS id, text, zotero_key, zotero_url FROM herodotus.records WHERE id = '${knownId}';`,
+    ].join("\n")
+    const kept = spawnSync("duckdb", ["-json", ":memory:"], { input: script, encoding: "utf8" })
+    assert.equal(kept.status, 0, kept.stderr)
+    assert.deepEqual(lastJson(kept.stdout), [
+      { id: knownId, text: "revised", zotero_key: linkKey, zotero_url: linkUrl },
+    ])
   })
 })
