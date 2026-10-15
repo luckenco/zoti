@@ -34,7 +34,7 @@ ZOTERO_USER_ID='<zotero user id>'
 
 Tokens must be distinct. Alchemy uploads these values as Worker secrets. For local development, copy `apps/worker/.dev.vars.example` to gitignored `apps/worker/.dev.vars`, fill it in, and run `bun run --filter @herodotus/worker dev`.
 
-From `apps/worker`, put the Zotero secrets on the Worker:
+For local `wrangler dev`, run these from `apps/worker`. Production still reads the same names from `infra/.env` through Alchemy.
 
 ```sh
 bunx wrangler secret put ZOTERO_API_KEY
