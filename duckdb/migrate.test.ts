@@ -119,22 +119,30 @@ describe("runMigrations", () => {
     const files = checkedIn()
     assert.deepEqual(
       files.map((file) => file.filename),
-      ["001_records.sql", "002_consumed_at.sql"],
+      ["001_records.sql", "002_consumed_at.sql", "003_zotero.sql"],
     )
     const first = splitSql(files[0]?.sql ?? "")
     const second = splitSql(files[1]?.sql ?? "")
+    const third = splitSql(files[2]?.sql ?? "")
     assert.equal(first.length, 1)
     assert.equal(second.length, 1)
+    assert.equal(third.length, 2)
     assert.match(first[0] ?? "", /^CREATE TABLE IF NOT EXISTS records\b/)
     assert.match(second[0] ?? "", /^ALTER TABLE records ADD COLUMN IF NOT EXISTS consumed_at\b/)
+    assert.match(third[0] ?? "", /^ALTER TABLE records ADD COLUMN IF NOT EXISTS zotero_key\b/)
+    assert.match(third[1] ?? "", /^ALTER TABLE records ADD COLUMN IF NOT EXISTS zotero_url\b/)
 
     const client = new MemoryClient()
     const logged: Array<string> = []
     const applied = await runMigrations(client, [...files].reverse(), (message) => {
       logged.push(message)
     })
-    assert.deepEqual(applied, ["001_records.sql", "002_consumed_at.sql"])
-    assert.deepEqual(logged, ["applied 001_records.sql", "applied 002_consumed_at.sql"])
+    assert.deepEqual(applied, ["001_records.sql", "002_consumed_at.sql", "003_zotero.sql"])
+    assert.deepEqual(logged, [
+      "applied 001_records.sql",
+      "applied 002_consumed_at.sql",
+      "applied 003_zotero.sql",
+    ])
     assert.deepEqual(
       client.calls.map((call) => call.text),
       [
@@ -148,10 +156,16 @@ describe("runMigrations", () => {
         second[0],
         recordMigrationSql,
         "COMMIT",
+        "BEGIN",
+        third[0],
+        third[1],
+        recordMigrationSql,
+        "COMMIT",
       ],
     )
     assert.deepEqual(client.calls[4]?.values, ["001_records.sql"])
     assert.deepEqual(client.calls[8]?.values, ["002_consumed_at.sql"])
+    assert.deepEqual(client.calls[13]?.values, ["003_zotero.sql"])
 
     const before = client.calls.length
     const again = await runMigrations(client, files)
@@ -231,13 +245,15 @@ describe("runMigrations", () => {
 })
 
 describe("checked-in migrations on duckdb", () => {
-  it("re-runs 001 and 002 inside transactions and records them", () => {
+  it("re-runs 001, 002, and 003 inside transactions and records them", () => {
     const files = loadMigrations(migrationsDir)
     const first = splitSql(files[0]?.sql ?? "")
     const second = splitSql(files[1]?.sql ?? "")
+    const third = splitSql(files[2]?.sql ?? "")
     const script = [
       ...first,
       ...second,
+      ...third,
       schemaMigrationsSql,
       `PREPARE record AS ${recordMigrationSql}`,
       "BEGIN",
@@ -248,6 +264,10 @@ describe("checked-in migrations on duckdb", () => {
       ...second,
       "EXECUTE record('002_consumed_at.sql')",
       "COMMIT",
+      "BEGIN",
+      ...third,
+      "EXECUTE record('003_zotero.sql')",
+      "COMMIT",
       "SELECT filename FROM schema_migrations ORDER BY filename",
     ].join(";\n")
     const result = spawnSync("duckdb", ["-json", ":memory:"], { input: `${script};`, encoding: "utf8" })
@@ -255,6 +275,7 @@ describe("checked-in migrations on duckdb", () => {
     assert.deepEqual(lastJson(result.stdout), [
       { filename: "001_records.sql" },
       { filename: "002_consumed_at.sql" },
+      { filename: "003_zotero.sql" },
     ])
   })
 })

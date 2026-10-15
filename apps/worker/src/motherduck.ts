@@ -1,4 +1,4 @@
-import { Misconfigured, StoreWriteFailed } from "@herodotus/schema"
+import { Misconfigured, NotFound, StoreWriteFailed } from "@herodotus/schema"
 import { Context, Effect, Layer } from "effect"
 import { Client } from "pg"
 import {
@@ -6,7 +6,9 @@ import {
   insertRecords,
   markConsumed,
   recentRecords,
+  recordById,
   searchRecords,
+  stampZotero,
   type RecordSearch,
   type SettledRow,
   type SqlStatement,
@@ -28,6 +30,8 @@ export interface RecordView {
   readonly tags: ReadonlyArray<string>
   readonly ts: string
   readonly consumedAt: string | null
+  readonly zoteroKey: string | null
+  readonly zoteroUrl: string | null
 }
 
 export class ItemStore extends Context.Tag("ItemStore")<
@@ -47,6 +51,15 @@ export class ItemStore extends Context.Tag("ItemStore")<
       ids: ReadonlyArray<string>,
       consumed: boolean,
     ) => Effect.Effect<ReadonlyArray<string>, StoreWriteFailed | Misconfigured>
+    readonly get: (id: string) => Effect.Effect<RecordView | null, StoreWriteFailed | Misconfigured>
+    readonly stampZotero: (
+      id: string,
+      zoteroKey: string,
+      zoteroUrl: string,
+    ) => Effect.Effect<
+      { readonly zoteroKey: string; readonly zoteroUrl: string },
+      StoreWriteFailed | Misconfigured | NotFound
+    >
   }
 >() {}
 
@@ -153,6 +166,18 @@ const textOf = (value: unknown, allowEmpty = false): string => {
   return value
 }
 
+const linkColumns = (
+  row: Record<string, unknown>,
+): { readonly zoteroKey: string | null; readonly zoteroUrl: string | null } => {
+  const zoteroKey = nullableString(row.zotero_key)
+  const zoteroUrl = nullableString(row.zotero_url)
+  if (zoteroKey === null && zoteroUrl === null) return { zoteroKey, zoteroUrl }
+  if (zoteroKey !== null && zoteroKey.length > 0 && zoteroUrl !== null && zoteroUrl.length > 0) {
+    return { zoteroKey, zoteroUrl }
+  }
+  throw new Error("unexpected record row")
+}
+
 const recordView = (row: Record<string, unknown>): RecordView => ({
   id: textOf(row.id),
   kind: textOf(row.kind),
@@ -169,7 +194,16 @@ const recordView = (row: Record<string, unknown>): RecordView => ({
   tags: tagsOf(row.tags),
   ts: timestamp(row.ts),
   consumedAt: nullableString(row.consumed_at),
+  ...linkColumns(row),
 })
+
+const stampedPair = (
+  row: Record<string, unknown>,
+): { readonly zoteroKey: string; readonly zoteroUrl: string } => {
+  const pair = linkColumns(row)
+  if (pair.zoteroKey === null || pair.zoteroUrl === null) throw new Error("unexpected record row")
+  return { zoteroKey: pair.zoteroKey, zoteroUrl: pair.zoteroUrl }
+}
 
 const recordsOf = (rows: ReadonlyArray<Record<string, unknown>>): ReadonlyArray<RecordView> =>
   rows.map(recordView)
@@ -224,5 +258,26 @@ export const motherDuckLayer = (config: MotherDuckConfig): Layer.Layer<ItemStore
         withSession(config, (session, database) =>
           session.query(markConsumed(database, ids, consumed)).then(idsOf),
         ),
+      get: (id) =>
+        withSession(config, async (session, database) => {
+          const rows = await session.query(recordById(database, id))
+          const row = rows[0]
+          if (row === undefined) return null
+          return recordView(row)
+        }),
+      stampZotero: (id, zoteroKey, zoteroUrl) =>
+        Effect.gen(function* () {
+          const outcome = yield* withSession(config, async (session, database) => {
+            const updated = await session.query(stampZotero(database, id, zoteroKey, zoteroUrl))
+            const written = updated[0]
+            if (written !== undefined) return { _tag: "Stamped" as const, pair: stampedPair(written) }
+            const loaded = await session.query(recordById(database, id))
+            const row = loaded[0]
+            if (row === undefined) return { _tag: "Missing" as const }
+            return { _tag: "Kept" as const, pair: stampedPair(row) }
+          })
+          if (outcome._tag === "Missing") return yield* new NotFound()
+          return outcome.pair
+        }),
     })),
   )

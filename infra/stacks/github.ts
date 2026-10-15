@@ -20,6 +20,8 @@ export default Alchemy.Stack(
     const motherDuckHost = yield* Config.Redacted("MOTHERDUCK_HOST")
     const motherDuckDatabase = yield* Config.Redacted("MOTHERDUCK_DATABASE")
     const motherDuckToken = yield* Config.Redacted("MOTHERDUCK_TOKEN")
+    const zoteroApiKey = yield* Config.Redacted("ZOTERO_API_KEY")
+    const zoteroUserId = yield* Config.Redacted("ZOTERO_USER_ID")
 
     const apiToken = yield* Cloudflare.ApiToken.AccountApiToken("CIToken", {
       name: "herodotus-ci",
@@ -51,6 +53,8 @@ export default Alchemy.Stack(
         MOTHERDUCK_HOST: motherDuckHost,
         MOTHERDUCK_DATABASE: motherDuckDatabase,
         MOTHERDUCK_TOKEN: motherDuckToken,
+        ZOTERO_API_KEY: zoteroApiKey,
+        ZOTERO_USER_ID: zoteroUserId,
       },
     })
 

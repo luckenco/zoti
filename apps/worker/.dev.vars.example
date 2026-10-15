@@ -2,3 +2,5 @@ AUTH_TOKENS={"chrome":{"token":"replace-chrome-token","actor":"human"},"you":{"t
 MOTHERDUCK_HOST=pg.us-east-1-aws.motherduck.com
 MOTHERDUCK_DATABASE=herodotus
 MOTHERDUCK_TOKEN=replace-me
+ZOTERO_API_KEY=replace-me
+ZOTERO_USER_ID=replace-me

@@ -22,6 +22,8 @@ jobs:
       MOTHERDUCK_HOST: ${{ secrets.MOTHERDUCK_HOST }}
       MOTHERDUCK_DATABASE: ${{ secrets.MOTHERDUCK_DATABASE }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+      ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

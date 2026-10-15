@@ -37,6 +37,8 @@ export default Alchemy.Stack(
         MOTHERDUCK_HOST: Config.Redacted("MOTHERDUCK_HOST"),
         MOTHERDUCK_DATABASE: Config.Redacted("MOTHERDUCK_DATABASE"),
         MOTHERDUCK_TOKEN: Config.Redacted("MOTHERDUCK_TOKEN"),
+        ZOTERO_API_KEY: Config.Redacted("ZOTERO_API_KEY"),
+        ZOTERO_USER_ID: Config.Redacted("ZOTERO_USER_ID"),
         INGEST_RATE_LIMITER: Cloudflare.RateLimit("INGEST_RATE_LIMITER", {
           namespaceId: "1001",
           simple: { limit: 60, period: 60 },

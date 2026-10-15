@@ -1,13 +1,14 @@
 import { describe, it } from "@effect/vitest"
 import assert from "node:assert/strict"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, TestClock } from "effect"
 import { authLayer, type Identity } from "./auth"
 import { authorize, IdSource } from "./handler"
 import { workerFetch } from "./index"
-import { addItem, markConsumedItems, recentItems, searchItems } from "./mcp-tools"
+import { addItem, markConsumedItems, recentItems, searchItems, searchZotero, sendToZotero } from "./mcp-tools"
 import { motherDuckLayer, type SqlSession } from "./motherduck"
 import { rateLimitLayer, type RateLimitBinding } from "./rate-limit"
-import { insertRecords, markConsumed, recentRecords, searchRecords, type SqlStatement } from "./sql"
+import { insertRecords, markConsumed, recentRecords, recordById, searchRecords, stampZotero, type SqlStatement } from "./sql"
+import { zoteroLayer, type ZoteroCall, type ZoteroReply } from "./zotero"
 
 const fixedId = "22222222-2222-4222-8222-222222222222"
 const knownId = "0f8fad5b-d9cb-469f-a165-70867728950e"
@@ -144,6 +145,8 @@ describe("mcp tools", () => {
           text: "the selected passage",
           tags: '["reading"]',
           ts: new Date("2026-10-13T10:52:00.000Z"),
+          zotero_key: "ABCD2345",
+          zotero_url: "https://www.zotero.org/users/1234567/items/ABCD2345",
         },
       ])
       const payload = "'; DROP TABLE records; --"
@@ -190,6 +193,8 @@ describe("mcp tools", () => {
             tags: ["reading"],
             ts: "2026-10-13T10:52:00.000Z",
             consumedAt: null,
+            zoteroKey: "ABCD2345",
+            zoteroUrl: "https://www.zotero.org/users/1234567/items/ABCD2345",
           },
         ],
       })
@@ -311,6 +316,8 @@ describe("mcp endpoint", () => {
       MOTHERDUCK_HOST: "not a host",
       MOTHERDUCK_DATABASE: "herodotus",
       MOTHERDUCK_TOKEN: "test-password",
+      ZOTERO_API_KEY: "test-zotero-key",
+      ZOTERO_USER_ID: "1234567",
       INGEST_RATE_LIMITER: binding(allow, keys),
     }
     return Effect.gen(function* () {
@@ -367,7 +374,7 @@ describe("mcp endpoint", () => {
       }
       assert.deepEqual(
         listed.result.tools.map((tool) => tool.name),
-        ["add_item", "search_items", "recent_items", "mark_consumed"],
+        ["add_item", "search_items", "recent_items", "mark_consumed", "send_to_zotero", "search_zotero"],
       )
     }),
   )
@@ -385,6 +392,379 @@ describe("mcp endpoint", () => {
       const health = yield* call(new Request("https://herodotus-ingress.cloudflare-swimming382.workers.dev/health"))
       assert.equal(health.status, 200)
       assert.equal(health.body, JSON.stringify({ ok: true }))
+    }),
+  )
+})
+
+const zoteroUser = "1234567"
+const zoteroApiKey = "test-zotero-key"
+const zoteroKey = "ABCD2345"
+const zoteroUrl = `https://www.zotero.org/users/${zoteroUser}/items/${zoteroKey}`
+const postUrl = `https://api.zotero.org/users/${zoteroUser}/items`
+const capturedAt = "2026-10-13T10:52:00.000Z"
+
+const writeTokenOf = (id: string): string => id.replaceAll("-", "")
+
+const tagUrl = (id: string): string =>
+  `https://api.zotero.org/users/${zoteroUser}/items/top?format=json&itemType=webpage&limit=5&sort=dateAdded&direction=asc&tag=${encodeURIComponent(`herodotus:${id}`)}`
+
+const authHeaders = [
+  ["Zotero-API-Version", "3"],
+  ["Zotero-API-Key", zoteroApiKey],
+  ["Accept", "application/json"],
+] as const
+
+const postHeaders = (id: string) => [
+  ...authHeaders,
+  ["Content-Type", "application/json"],
+  ["Zotero-Write-Token", writeTokenOf(id)],
+]
+
+const webpageBody = (id: string): string =>
+  JSON.stringify([
+    {
+      itemType: "webpage",
+      title: "The post",
+      url: "https://example.com/post",
+      date: "2026-10-01",
+      accessDate: "2026-10-13",
+      websiteTitle: "example.com",
+      tags: [{ tag: "reading" }, { tag: `herodotus:${id}` }],
+    },
+  ])
+
+const linkText = (id: string): string =>
+  JSON.stringify({ id, zoteroKey, zoteroUrl })
+
+const storedRow = (
+  id: string,
+  link: { readonly zotero_key: string | null; readonly zotero_url: string | null },
+) => ({
+  id,
+  kind: "page",
+  via: "chrome",
+  actor: "human",
+  agent: null,
+  url: "https://example.com/post",
+  title: "The post",
+  author: null,
+  site: "example.com",
+  published_at: "2026-10-01T00:00:00.000Z",
+  about_id: null,
+  text: "",
+  tags: '["reading"]',
+  ts: capturedAt,
+  consumed_at: null,
+  zotero_key: link.zotero_key,
+  zotero_url: link.zotero_url,
+})
+
+const stampedRow = [{ zotero_key: zoteroKey, zotero_url: zoteroUrl }]
+
+const savedReply = (): ZoteroReply => ({
+  status: 200,
+  body: JSON.stringify({
+    successful: {
+      "0": {
+        key: zoteroKey,
+        links: { alternate: { href: zoteroUrl } },
+      },
+    },
+  }),
+  headers: [],
+})
+
+const emptyItems = (): ZoteroReply => ({ status: 200, body: "[]", headers: [] })
+
+const taggedItem = (): ZoteroReply => ({
+  status: 200,
+  body: JSON.stringify([
+    {
+      key: zoteroKey,
+      links: { alternate: { href: zoteroUrl } },
+      data: {
+        key: zoteroKey,
+        itemType: "webpage",
+        dateAdded: "2026-10-13T00:00:00Z",
+        title: "The post",
+      },
+    },
+  ]),
+  headers: [],
+})
+
+const zoteroHarness = (
+  queries: ReadonlyArray<ReadonlyArray<Record<string, unknown>>>,
+  replies: ReadonlyArray<ZoteroReply>,
+) => {
+  const recorded: Array<SqlStatement> = []
+  const calls: Array<ZoteroCall> = []
+  let queryIndex = 0
+  const open = (_connectionString: string): Promise<SqlSession> =>
+    Promise.resolve({
+      query: (statement) => {
+        recorded.push(statement)
+        const rows = queries[queryIndex] ?? []
+        queryIndex += 1
+        return Promise.resolve(rows)
+      },
+      close: () => Promise.resolve(),
+    })
+  const exchange = (call: ZoteroCall): Promise<ZoteroReply> => {
+    calls.push(call)
+    return Promise.resolve(replies[calls.length - 1] ?? { status: 500, body: "unexpected", headers: [] })
+  }
+  const store = Layer.mergeAll(
+    motherDuckLayer({
+      host: "pg.example.test",
+      database: "herodotus",
+      token: "test-password",
+      open,
+    }),
+    Layer.succeed(IdSource, { next: Effect.succeed(fixedId) }),
+  )
+  const layer = zoteroLayer({ apiKey: zoteroApiKey, userId: zoteroUser, exchange }).pipe(Layer.provideMerge(store))
+  return { recorded, calls, layer }
+}
+
+const assertTagGet = (call: ZoteroCall | undefined, id: string) => {
+  assert.ok(call)
+  assert.equal(call.method, "GET")
+  assert.equal(call.url, tagUrl(id))
+  assert.equal(call.url.includes(zoteroApiKey), false)
+  assert.deepEqual(call.headers, [...authHeaders])
+  assert.equal(call.body, null)
+}
+
+const assertWebpagePost = (call: ZoteroCall | undefined, id: string) => {
+  assert.ok(call)
+  assert.equal(call.method, "POST")
+  assert.equal(call.url, postUrl)
+  assert.equal(call.url.includes(zoteroApiKey), false)
+  assert.deepEqual(call.headers, postHeaders(id))
+  assert.equal(call.body, webpageBody(id))
+}
+
+describe("zotero tools", () => {
+  it.effect("send_to_zotero posts one webpage for an unlinked row", () =>
+    Effect.gen(function* () {
+      const { recorded, calls, layer } = zoteroHarness(
+        [[storedRow(knownId, { zotero_key: null, zotero_url: null })], stampedRow],
+        [emptyItems(), savedReply()],
+      )
+      const result = yield* sendToZotero({ id: knownId }, grokbot).pipe(Effect.provide(layer))
+      assert.equal(result.isError, undefined)
+      assert.equal(textOf(result), linkText(knownId))
+      assert.equal(calls.length, 2)
+      assertTagGet(calls[0], knownId)
+      assertWebpagePost(calls[1], knownId)
+      assert.deepEqual(recorded[0], recordById("herodotus", knownId))
+      assert.deepEqual(
+        recorded[1],
+        stampZotero("herodotus", knownId, zoteroKey, zoteroUrl),
+      )
+      assert.equal(recorded.length, 2)
+    }),
+  )
+
+  it.effect("send_to_zotero returns the stored link without calling Zotero", () =>
+    Effect.gen(function* () {
+      const { recorded, calls, layer } = zoteroHarness(
+        [[storedRow(knownId, { zotero_key: zoteroKey, zotero_url: zoteroUrl })]],
+        [],
+      )
+      const result = yield* sendToZotero({ id: knownId }, grokbot).pipe(Effect.provide(layer))
+      assert.equal(textOf(result), linkText(knownId))
+      assert.deepEqual(calls, [])
+      assert.deepEqual(recorded, [recordById("herodotus", knownId)])
+    }),
+  )
+
+  it.effect("send_to_zotero adopts the tagged item after a 412", () =>
+    Effect.gen(function* () {
+      const { recorded, calls, layer } = zoteroHarness(
+        [[storedRow(knownId, { zotero_key: null, zotero_url: null })], stampedRow],
+        [emptyItems(), { status: 412, body: "", headers: [] }, taggedItem()],
+      )
+      const result = yield* sendToZotero({ id: knownId }, grokbot).pipe(Effect.provide(layer))
+      assert.equal(textOf(result), linkText(knownId))
+      assert.deepEqual(
+        calls.map((call) => call.method),
+        ["GET", "POST", "GET"],
+      )
+      assertTagGet(calls[0], knownId)
+      assertWebpagePost(calls[1], knownId)
+      assertTagGet(calls[2], knownId)
+      assert.equal(calls.filter((call) => call.method === "POST").length, 1)
+      assert.deepEqual(recorded[1], stampZotero("herodotus", knownId, zoteroKey, zoteroUrl))
+    }),
+  )
+
+  it.effect("send_to_zotero inserts a page via mcp when the url has no id", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(capturedAt)
+      const input = {
+        url: "https://example.com/post",
+        title: "The post",
+        site: "example.com",
+        publishedAt: "2026-10-01T00:00:00.000Z",
+        tags: ["reading"],
+      }
+      const { recorded, calls, layer } = zoteroHarness(
+        [[], [storedRow(fixedId, { zotero_key: null, zotero_url: null })], stampedRow],
+        [emptyItems(), savedReply()],
+      )
+      const result = yield* sendToZotero(input, grokbot).pipe(Effect.provide(layer))
+      assert.equal(textOf(result), linkText(fixedId))
+      assert.deepEqual(
+        recorded[0],
+        insertRecords("herodotus", [
+          {
+            id: fixedId,
+            kind: "page",
+            via: "mcp",
+            actor: "agent",
+            agent: "grokbot",
+            url: "https://example.com/post",
+            title: "The post",
+            author: null,
+            site: "example.com",
+            published_at: "2026-10-01T00:00:00.000Z",
+            about_id: null,
+            text: "",
+            tags: ["reading"],
+            ts: capturedAt,
+            raw: JSON.stringify({ ...input, id: fixedId }),
+          },
+        ]),
+      )
+      assert.deepEqual(recorded[1], recordById("herodotus", fixedId))
+      assertWebpagePost(calls[1], fixedId)
+      assert.equal(calls[0]?.method, "GET")
+      assert.equal(calls.filter((call) => call.method === "POST").length, 1)
+    }),
+  )
+
+  it.effect("send_to_zotero files the stored row when the url id already exists", () =>
+    Effect.gen(function* () {
+      const { recorded, calls, layer } = zoteroHarness(
+        [[storedRow(knownId, { zotero_key: null, zotero_url: null })], stampedRow],
+        [emptyItems(), savedReply()],
+      )
+      const result = yield* sendToZotero(
+        {
+          id: knownId,
+          url: "https://example.com/ignored",
+          title: "Ignored title",
+          tags: ["other"],
+        },
+        grokbot,
+      ).pipe(Effect.provide(layer))
+      assert.equal(textOf(result), linkText(knownId))
+      assert.equal(recorded.some((statement) => statement.text.startsWith("INSERT")), false)
+      assert.deepEqual(recorded[0], recordById("herodotus", knownId))
+      assertWebpagePost(calls[1], knownId)
+    }),
+  )
+
+  it.effect("send_to_zotero returns record not found for an unknown id", () =>
+    Effect.gen(function* () {
+      const { recorded, calls, layer } = zoteroHarness([[]], [])
+      const result = yield* sendToZotero({ id: knownId }, grokbot).pipe(Effect.provide(layer))
+      assert.equal(result.isError, true)
+      assert.equal(textOf(result), "record not found")
+      assert.deepEqual(calls, [])
+      assert.deepEqual(recorded, [recordById("herodotus", knownId)])
+    }),
+  )
+
+  it.effect("search_zotero returns notes as plain text and attachment metadata", () =>
+    Effect.gen(function* () {
+      const top = [
+        {
+          key: zoteroKey,
+          links: { alternate: { href: zoteroUrl } },
+          data: {
+            key: zoteroKey,
+            itemType: "webpage",
+            title: "The post",
+            url: "https://example.com/post",
+            date: "2026-10-01",
+            tags: [{ tag: "reading" }, { tag: `herodotus:${knownId}` }],
+          },
+        },
+      ]
+      const children = [
+        {
+          key: "EFGH6789",
+          data: { key: "EFGH6789", itemType: "note", note: "<p>a note</p>" },
+        },
+        {
+          key: "IJKLM234",
+          data: {
+            key: "IJKLM234",
+            itemType: "attachment",
+            title: "PDF",
+            filename: "paper.pdf",
+            contentType: "application/pdf",
+            url: "https://example.com/paper.pdf",
+          },
+        },
+        {
+          key: "MNPQ5678",
+          data: { key: "MNPQ5678", itemType: "annotation", note: "drop me" },
+        },
+      ]
+      const { recorded, calls, layer } = zoteroHarness(
+        [],
+        [
+          { status: 200, body: JSON.stringify(top), headers: [["Total-Results", "1"]] },
+          { status: 200, body: JSON.stringify(children), headers: [] },
+        ],
+      )
+      const result = yield* searchZotero({ text: "The post" }).pipe(Effect.provide(layer))
+      assert.equal(result.isError, undefined)
+      assert.equal(
+        textOf(result),
+        JSON.stringify({
+          items: [
+            {
+              key: zoteroKey,
+              type: "webpage",
+              title: "The post",
+              url: "https://example.com/post",
+              date: "2026-10-01",
+              tags: ["reading", `herodotus:${knownId}`],
+              zoteroUrl,
+              notes: [{ key: "EFGH6789", text: "a note" }],
+              attachments: [
+                {
+                  key: "IJKLM234",
+                  title: "PDF",
+                  filename: "paper.pdf",
+                  contentType: "application/pdf",
+                  url: "https://example.com/paper.pdf",
+                },
+              ],
+            },
+          ],
+          nextStart: null,
+        }),
+      )
+      assert.deepEqual(recorded, [])
+      assert.equal(calls.length, 2)
+      assert.equal(calls[0]?.method, "GET")
+      assert.equal(
+        calls[0]?.url,
+        `https://api.zotero.org/users/${zoteroUser}/items/top?format=json&limit=10&q=The%20post&qmode=titleCreatorYear&start=0`,
+      )
+      assert.deepEqual(calls[0]?.headers, [...authHeaders])
+      assert.equal(calls[0]?.url.includes(zoteroApiKey), false)
+      assert.equal(calls[1]?.method, "GET")
+      assert.equal(
+        calls[1]?.url,
+        `https://api.zotero.org/users/${zoteroUser}/items/${zoteroKey}/children?format=json&limit=100`,
+      )
     }),
   )
 })

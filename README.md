@@ -28,9 +28,18 @@ AUTH_TOKENS='{"you":{"token":"<human-token>","actor":"human"},"chrome":{"token":
 MOTHERDUCK_HOST=pg.us-east-1-aws.motherduck.com
 MOTHERDUCK_DATABASE=herodotus
 MOTHERDUCK_TOKEN='<read-write token>'
+ZOTERO_API_KEY='<zotero api key>'
+ZOTERO_USER_ID='<zotero user id>'
 ```
 
 Tokens must be distinct. Alchemy uploads these values as Worker secrets. For local development, copy `apps/worker/.dev.vars.example` to gitignored `apps/worker/.dev.vars`, fill it in, and run `bun run --filter @herodotus/worker dev`.
+
+For local `wrangler dev`, run these from `apps/worker`. Production still reads the same names from `infra/.env` through Alchemy.
+
+```sh
+bunx wrangler secret put ZOTERO_API_KEY
+bunx wrangler secret put ZOTERO_USER_ID
+```
 
 GitHub is the source repository. Origin mirrors it. Pushes to `main` deploy production (`bun run alchemy deploy --stage prod` from `infra`) through GitHub Actions. The Worker is `herodotus-ingress`. Deployment state is remote.
 
@@ -52,7 +61,7 @@ bun run alchemy profile edit --profile admin
 bun run alchemy deploy --config stacks/github.ts --profile admin --stage prod
 ```
 
-That writes `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AUTH_TOKENS`, `MOTHERDUCK_HOST`, `MOTHERDUCK_DATABASE`, and `MOTHERDUCK_TOKEN` as Actions secrets.
+That writes `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AUTH_TOKENS`, `MOTHERDUCK_HOST`, `MOTHERDUCK_DATABASE`, `MOTHERDUCK_TOKEN`, `ZOTERO_API_KEY`, and `ZOTERO_USER_ID` as Actions secrets.
 
 ## Records
 
@@ -68,8 +77,10 @@ The Worker stamps `actor` and `agent` from the token. Requests that set either a
 - `search_items` filters by a case-insensitive substring of `text`, `title`, or `url`, plus `tag`, `source` (`via`), `type` (`kind`), an inclusive `from`/`to` range on `ts`, and `unread` (`consumed_at` is null). `limit` defaults to 20 and cannot exceed 100.
 - `recent_items` returns the newest records, with the same limit and `unread` filter.
 - `mark_consumed` sets `consumed_at` to now for up to 100 ids. `consumed` defaults to true; pass false to clear it.
+- `send_to_zotero` files one record into Zotero as a webpage and stores `zoteroKey` and `zoteroUrl` on that row. Pass `id` to file an existing record, or `url` to insert a page and file it. The same id returns the stored link.
+- `search_zotero` phrase-searches the Zotero library. `mode` `title` (default) matches title and creator. `everything` matches the whole item. `limit` defaults to 10 and cannot exceed 25.
 
-Reads include `consumedAt`. Upserting the same id does not change `consumed_at`.
+Reads include `consumedAt`, `zoteroKey`, and `zoteroUrl`. Upserting the same id does not change `consumed_at`, `zotero_key`, or `zotero_url`.
 
 `grokbot` in `AUTH_TOKENS` above is that client: its own token, `"actor":"agent"`. Copy the same JSON into `apps/worker/.dev.vars` for local `wrangler dev`. Redeploy from `infra` with `bun run alchemy deploy --stage prod` so the Worker secret updates.
 
