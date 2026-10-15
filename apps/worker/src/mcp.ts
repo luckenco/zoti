@@ -17,13 +17,20 @@ import {
   searchItems,
   searchItemsDescription,
   searchItemsInput,
+  searchZotero,
+  searchZoteroDescription,
+  searchZoteroInput,
+  sendToZotero,
+  sendToZoteroDescription,
+  sendToZoteroInput,
 } from "./mcp-tools"
 import { ItemStore, motherDuckLayer } from "./motherduck"
+import { Zotero, zoteroLayer } from "./zotero"
 
 const createServer = (env: WorkerBindings, identity: Identity | null): McpServer => {
   const server = new McpServer({ name: "herodotus", version: "0.1.0" })
   if (identity === null) return server
-  const layer = Layer.mergeAll(
+  const store = Layer.mergeAll(
     motherDuckLayer({
       host: env.MOTHERDUCK_HOST,
       database: env.MOTHERDUCK_DATABASE,
@@ -31,8 +38,13 @@ const createServer = (env: WorkerBindings, identity: Identity | null): McpServer
     }),
     idLayer,
   )
-  const run = (effect: Effect.Effect<CallToolResult, never, ItemStore | IdSource>): Promise<CallToolResult> =>
-    Effect.runPromise(effect.pipe(Effect.provide(layer)))
+  const layer = zoteroLayer({
+    apiKey: env.ZOTERO_API_KEY,
+    userId: env.ZOTERO_USER_ID,
+  }).pipe(Layer.provideMerge(store))
+  const run = (
+    effect: Effect.Effect<CallToolResult, never, ItemStore | IdSource | Zotero>,
+  ): Promise<CallToolResult> => Effect.runPromise(effect.pipe(Effect.provide(layer)))
   server.registerTool(
     "add_item",
     { description: addItemDescription, inputSchema: addItemInput },
@@ -52,6 +64,16 @@ const createServer = (env: WorkerBindings, identity: Identity | null): McpServer
     "mark_consumed",
     { description: markConsumedDescription, inputSchema: markConsumedInput },
     (args) => run(markConsumedItems(args)),
+  )
+  server.registerTool(
+    "send_to_zotero",
+    { description: sendToZoteroDescription, inputSchema: sendToZoteroInput },
+    (args) => run(sendToZotero(args, identity)),
+  )
+  server.registerTool(
+    "search_zotero",
+    { description: searchZoteroDescription, inputSchema: searchZoteroInput },
+    (args) => run(searchZotero(args)),
   )
   return server
 }
