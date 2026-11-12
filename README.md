@@ -79,4 +79,6 @@ bun alchemy deploy --config stacks/github.ts --profile admin --stage prod
 
 This provisions `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AUTH_TOKENS`, `ZOTERO_API_KEY`, and `ZOTERO_USER_ID`.
 
-Verify `/health`, an authenticated MCP `tools/list`, and `search_zotero` after deployment. A Worker rename creates a new endpoint: update MCP clients and retire the previous Worker after verification. Renaming the stack does not delete its previous deployment or stored database data.
+Verify `/health`, an authenticated MCP `tools/list`, and `search_zotero` after deployment.
+
+Zoti is independent of the Herodotus app in `../herodotus`. They serve different audiences: keep both deployments running. Zoti uses the `zoti` Worker/stack, `zoti-github` secrets-provisioning stack, and rate-limit namespace `1002`. Herodotus keeps its own repository, Worker, deployment state, secrets, and database. Deploying or removing Zoti must not retire Herodotus.

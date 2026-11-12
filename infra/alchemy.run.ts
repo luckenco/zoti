@@ -37,7 +37,7 @@ export default Alchemy.Stack(
         ZOTERO_API_KEY: Config.Redacted("ZOTERO_API_KEY"),
         ZOTERO_USER_ID: Config.Redacted("ZOTERO_USER_ID"),
         MCP_RATE_LIMITER: Cloudflare.RateLimit("MCP_RATE_LIMITER", {
-          namespaceId: "1001",
+          namespaceId: "1002",
           simple: { limit: 60, period: 60 },
         }),
       },

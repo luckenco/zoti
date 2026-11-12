@@ -7,7 +7,7 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 
 export default Alchemy.Stack(
-  "github",
+  "zoti-github",
   {
     providers: Layer.mergeAll(Cloudflare.providers(), GitHub.providers()),
     state: Cloudflare.state(),
