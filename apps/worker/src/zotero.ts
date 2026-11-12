@@ -24,6 +24,7 @@ export type SendRequest =
       readonly publishedAt: string | null
       readonly text: string
       readonly tags: ReadonlyArray<string>
+      readonly collections: ReadonlyArray<string>
     }
 
 export interface ZoteroQuery {
@@ -63,6 +64,32 @@ export interface ZoteroPage {
   readonly nextStart: number | null
 }
 
+export interface CollectionQuery {
+  readonly limit: number
+  readonly start: number
+}
+
+export interface ZoteroCollection {
+  readonly key: string
+  readonly name: string
+  readonly parentCollection: string | null
+}
+
+export interface CollectionPage {
+  readonly collections: ReadonlyArray<ZoteroCollection>
+  readonly nextStart: number | null
+}
+
+export interface CollectionAssignment {
+  readonly zoteroKey: ZoteroItemKey
+  readonly zoteroUrl: ZoteroItemUrl
+  readonly collections: ReadonlyArray<string>
+}
+
+export class CollectionAssignmentFailed extends Data.TaggedError("CollectionAssignmentFailed")<{
+  readonly message: string
+}> {}
+
 export class ZoteroFailed extends Data.TaggedError("ZoteroFailed")<{
   readonly id: string | null
 }> {}
@@ -70,7 +97,7 @@ export class ZoteroFailed extends Data.TaggedError("ZoteroFailed")<{
 export type SendError = Misconfigured | NotFound | ZoteroFailed
 
 export interface ZoteroCall {
-  readonly method: "GET" | "POST"
+  readonly method: "GET" | "POST" | "PATCH"
   readonly url: string
   readonly headers: ReadonlyArray<readonly [string, string]>
   readonly body: string | null
@@ -93,6 +120,9 @@ export class Zotero extends Context.Tag("Zotero")<
   {
     readonly send: (request: SendRequest) => Effect.Effect<ZoteroLink, SendError>
     readonly search: (query: ZoteroQuery) => Effect.Effect<ZoteroPage, ZoteroFailed | Misconfigured>
+    readonly listCollections: (query: CollectionQuery) => Effect.Effect<CollectionPage, ZoteroFailed | Misconfigured>
+    readonly addToCollection: (key: string, collectionKey: string) =>
+      Effect.Effect<CollectionAssignment, ZoteroFailed | Misconfigured | CollectionAssignmentFailed>
   }
 >() {}
 
@@ -256,6 +286,7 @@ const webpageJson = (row: Webpage): string => {
       accessDate: utcDay(row.ts),
       websiteTitle: row.site !== null && row.site.length > 0 ? row.site : undefined,
       tags,
+      collections: row.collections,
     },
   ])
 }
@@ -547,8 +578,91 @@ const search = (
     return { items, nextStart: nextStartOf(query.start, query.limit, items.length, reply.headers) }
   })
 
+const parseCollections = (body: string): ReadonlyArray<ZoteroCollection> | null => {
+  const json = jsonValue(body)
+  if (!Array.isArray(json)) return null
+  const collections: ZoteroCollection[] = []
+  for (const collection of json) {
+    if (!isRecord(collection) || !isRecord(collection.data)) return null
+    const { key, name, parentCollection } = collection.data
+    if (typeof key !== "string" || !itemKeyPattern.test(key) || typeof name !== "string") return null
+    if (parentCollection !== false && (typeof parentCollection !== "string" || !itemKeyPattern.test(parentCollection))) {
+      return null
+    }
+    collections.push({ key, name, parentCollection: parentCollection === false ? null : parentCollection })
+  }
+  return collections
+}
+
+const listCollections = (
+  config: ZoteroConfig,
+  exchange: Exchange,
+  query: CollectionQuery,
+): Effect.Effect<CollectionPage, ZoteroFailed | Misconfigured> =>
+  Effect.gen(function* () {
+    const ready = yield* readyConfig(config)
+    const url = `${apiBase}/users/${ready.userId}/collections?${queryString([
+      ["format", "json"], ["limit", String(query.limit)], ["start", String(query.start)],
+    ])}`
+    const reply = yield* callRemote(exchange, ready.apiKey, null, getCall(ready.apiKey, url))
+    if (reply.status !== 200) return yield* failed(ready.apiKey, reply.status, reply.body, null)
+    const collections = parseCollections(reply.body)
+    if (collections === null) return yield* failed(ready.apiKey, reply.status, reply.body, null)
+    return { collections, nextStart: nextStartOf(query.start, query.limit, collections.length, reply.headers) }
+  })
+
+const addToCollection = (
+  config: ZoteroConfig,
+  exchange: Exchange,
+  key: string,
+  collectionKey: string,
+): Effect.Effect<CollectionAssignment, ZoteroFailed | Misconfigured | CollectionAssignmentFailed> =>
+  Effect.gen(function* () {
+    const ready = yield* readyConfig(config)
+    const url = `${apiBase}/users/${ready.userId}/items/${encodeURIComponent(key)}`
+    const reply = yield* callRemote(exchange, ready.apiKey, null, getCall(ready.apiKey, `${url}?format=json`))
+    if (reply.status === 404) {
+      return yield* new CollectionAssignmentFailed({ message: "Zotero item not found; check itemKey" })
+    }
+    if (reply.status !== 200) return yield* failed(ready.apiKey, reply.status, reply.body, null)
+    const item = jsonValue(reply.body)
+    if (!isRecord(item) || !isRecord(item.data)) return yield* failed(ready.apiKey, reply.status, reply.body, null)
+    const zoteroKey = keyOf(item, item.data)
+    const { collections, parentItem } = item.data
+    const version = item.version
+    if (parentItem) {
+      return yield* new CollectionAssignmentFailed({ message: "Child items cannot be assigned to collections; use the parent itemKey" })
+    }
+    // Never replace memberships unless the complete current list and version are valid.
+    if (zoteroKey !== key || typeof version !== "number" || !Number.isSafeInteger(version) || version < 0 ||
+      !Array.isArray(collections) || !collections.every((value): value is string =>
+        typeof value === "string" && itemKeyPattern.test(value))) {
+      return yield* failed(ready.apiKey, reply.status, reply.body, null)
+    }
+    const zoteroUrl = urlFor(ready.userId, zoteroKey, alternateHref(item))
+    if (collections.includes(collectionKey)) return { zoteroKey, zoteroUrl, collections }
+    const updated = [...collections, collectionKey]
+    const written = yield* callRemote(exchange, ready.apiKey, null, {
+      method: "PATCH",
+      url,
+      headers: [
+        ...authHeaders(ready.apiKey),
+        ["Content-Type", "application/json"],
+        ["If-Unmodified-Since-Version", String(version)],
+      ],
+      body: JSON.stringify({ collections: updated }),
+    })
+    if (written.status === 412) {
+      return yield* new CollectionAssignmentFailed({ message: "Zotero item changed during assignment; retry add_to_zotero_collection to read its latest memberships" })
+    }
+    if (written.status !== 204) return yield* failed(ready.apiKey, written.status, written.body, null)
+    return { zoteroKey, zoteroUrl, collections: updated }
+  })
+
 export const zoteroLayer = (config: ZoteroConfig): Layer.Layer<Zotero> =>
   Layer.succeed(Zotero, {
     send: (request) => send(config, config.exchange ?? defaultExchange, request),
     search: (query) => search(config, config.exchange ?? defaultExchange, query),
+    listCollections: (query) => listCollections(config, config.exchange ?? defaultExchange, query),
+    addToCollection: (key, collectionKey) => addToCollection(config, config.exchange ?? defaultExchange, key, collectionKey),
   })

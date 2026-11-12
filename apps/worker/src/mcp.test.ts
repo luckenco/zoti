@@ -68,7 +68,7 @@ describe("MCP endpoint", () => {
     const result = yield* call(rpc("tools/list"))
     assert.equal(result.response.status, 200)
     assert.deepEqual(rpcBody(result.body).result.tools.map((tool: { name: string }) => tool.name), [
-      "send_to_zotero", "search_zotero",
+      "send_to_zotero", "search_zotero", "list_zotero_collections", "add_to_zotero_collection",
     ])
     assert.deepEqual(result.keys, ["pi"])
   }))
@@ -82,10 +82,16 @@ describe("MCP endpoint", () => {
   }))
 
   it.effect("runs tools through MCP and returns configuration errors safely", () => Effect.gen(function* () {
-    const result = yield* call(rpc("tools/call", { name: "search_zotero", arguments: {} }))
-    assert.equal(result.response.status, 200)
-    assert.equal(rpcBody(result.body).result.isError, true)
-    assert.equal(rpcBody(result.body).result.content[0].text, "ZOTERO_API_KEY is empty")
+    for (const [name, args] of [
+      ["search_zotero", {}],
+      ["list_zotero_collections", {}],
+      ["add_to_zotero_collection", { itemKey: "ABCD2345", collectionKey: "BCDE3456" }],
+    ] as const) {
+      const result = yield* call(rpc("tools/call", { name, arguments: args }))
+      assert.equal(result.response.status, 200)
+      assert.equal(rpcBody(result.body).result.isError, true)
+      assert.equal(rpcBody(result.body).result.content[0].text, "ZOTERO_API_KEY is empty")
+    }
   }))
 
   it.effect("rate limits authenticated and anonymous callers", () => Effect.gen(function* () {

@@ -4,6 +4,12 @@ import { Effect } from "effect"
 import type { Identity } from "./auth"
 import type { WorkerBindings } from "./bindings"
 import {
+  addToZoteroCollection,
+  addToZoteroCollectionDescription,
+  addToZoteroCollectionInput,
+  listZoteroCollections,
+  listZoteroCollectionsDescription,
+  listZoteroCollectionsInput,
   searchZotero,
   searchZoteroDescription,
   searchZoteroInput,
@@ -28,6 +34,16 @@ const createServer = (env: WorkerBindings, identity: Identity | null): McpServer
     "search_zotero",
     { description: searchZoteroDescription, inputSchema: searchZoteroInput },
     (args) => run(searchZotero(args)),
+  )
+  server.registerTool(
+    "list_zotero_collections",
+    { description: listZoteroCollectionsDescription, inputSchema: listZoteroCollectionsInput },
+    (args) => run(listZoteroCollections(args)),
+  )
+  server.registerTool(
+    "add_to_zotero_collection",
+    { description: addToZoteroCollectionDescription, inputSchema: addToZoteroCollectionInput },
+    (args) => run(addToZoteroCollection(args)),
   )
   return server
 }
