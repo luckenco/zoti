@@ -1,15 +1,12 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "herodotus-ingress",
+  "name": "zoti",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-13",
   "compatibility_flags": ["nodejs_compat"],
   "secrets": {
     "required": [
       "AUTH_TOKENS",
-      "MOTHERDUCK_HOST",
-      "MOTHERDUCK_DATABASE",
-      "MOTHERDUCK_TOKEN",
       "ZOTERO_API_KEY",
       "ZOTERO_USER_ID"
     ]
@@ -27,7 +24,7 @@
   },
   "ratelimits": [
     {
-      "name": "INGEST_RATE_LIMITER",
+      "name": "MCP_RATE_LIMITER",
       "namespace_id": "1001",
       "simple": {
         "limit": 60,

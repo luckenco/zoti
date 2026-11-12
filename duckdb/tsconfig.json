@@ -1,9 +1,0 @@
-{
-  "extends": "../tsconfig.base.json",
-  "compilerOptions": {
-    "rootDir": ".",
-    "typeRoots": ["../infra/node_modules/@types"],
-    "types": ["node"]
-  },
-  "include": ["migrate.ts", "pg.d.ts"]
-}

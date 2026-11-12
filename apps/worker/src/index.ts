@@ -1,21 +1,14 @@
 import { Cause, Effect, Layer } from "effect"
 import { authLayer } from "./auth"
 import type { WorkerBindings } from "./bindings"
-import { authorize, failureResponse, handle, idLayer } from "./handler"
+import { authorize, failureResponse } from "./handler"
 import { mcpResponse } from "./mcp"
-import { motherDuckLayer } from "./motherduck"
 import { rateLimitLayer } from "./rate-limit"
 
 export const appLayer = (env: WorkerBindings) =>
   Layer.mergeAll(
     authLayer(env.AUTH_TOKENS),
-    rateLimitLayer(env.INGEST_RATE_LIMITER),
-    motherDuckLayer({
-      host: env.MOTHERDUCK_HOST,
-      database: env.MOTHERDUCK_DATABASE,
-      token: env.MOTHERDUCK_TOKEN,
-    }),
-    idLayer,
+    rateLimitLayer(env.MCP_RATE_LIMITER),
   )
 
 const defectResponse = (cause: Cause.Cause<never>): Response => {
@@ -49,7 +42,8 @@ export const workerFetch = (
       }
       return yield* Effect.promise(() => mcpResponse(request, env, ctx, null))
     }
-    return yield* handle(request)
+    if (path === "/health" && request.method === "GET") return Response.json({ ok: true })
+    return new Response("Not found", { status: 404 })
   }).pipe(Effect.provide(appLayer(env)))
 
 export default {

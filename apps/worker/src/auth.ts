@@ -1,4 +1,4 @@
-import { type Actor, Misconfigured, Unauthorized } from "@herodotus/schema"
+import { Misconfigured, Unauthorized } from "./errors"
 import { Context, Effect, Layer } from "effect"
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -6,7 +6,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export interface Identity {
   readonly name: string
-  readonly actor: Actor
 }
 
 interface TokenEntry extends Identity {
@@ -26,12 +25,11 @@ export const parseAuthTokens = (raw: string): Effect.Effect<ReadonlyArray<TokenE
       const seen = new Set<string>()
       for (const [name, entry] of Object.entries(value)) {
         if (name.length === 0 || !isRecord(entry)) return bad("AUTH_TOKENS entries must be objects")
-        const { token, actor } = entry
+        const { token } = entry
         if (typeof token !== "string" || token.length === 0) return bad("AUTH_TOKENS token must be a non-empty string")
-        if (actor !== "human" && actor !== "agent") return bad("AUTH_TOKENS actor must be human or agent")
         if (seen.has(token)) return bad("AUTH_TOKENS tokens must be unique")
         seen.add(token)
-        entries.push({ name, token, actor })
+        entries.push({ name, token })
       }
       if (entries.length === 0) return bad("AUTH_TOKENS is empty")
       return Effect.succeed(entries)
@@ -81,7 +79,7 @@ export const authLayer = (raw: string): Layer.Layer<Auth> =>
           let found: Identity | null = null
           for (const entry of tokens) {
             const digest = yield* sha256(entry.token)
-            if (digestsEqual(presentedDigest, digest)) found = { name: entry.name, actor: entry.actor }
+            if (digestsEqual(presentedDigest, digest)) found = { name: entry.name }
           }
           if (found === null) return yield* new Unauthorized()
           return found

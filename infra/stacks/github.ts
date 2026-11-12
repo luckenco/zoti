@@ -17,14 +17,11 @@ export default Alchemy.Stack(
     const repository = yield* Config.String("GITHUB_REPOSITORY")
     const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment
     const authTokens = yield* Config.Redacted("AUTH_TOKENS")
-    const motherDuckHost = yield* Config.Redacted("MOTHERDUCK_HOST")
-    const motherDuckDatabase = yield* Config.Redacted("MOTHERDUCK_DATABASE")
-    const motherDuckToken = yield* Config.Redacted("MOTHERDUCK_TOKEN")
     const zoteroApiKey = yield* Config.Redacted("ZOTERO_API_KEY")
     const zoteroUserId = yield* Config.Redacted("ZOTERO_USER_ID")
 
     const apiToken = yield* Cloudflare.ApiToken.AccountApiToken("CIToken", {
-      name: "herodotus-ci",
+      name: "zoti-ci",
       accountId,
       policies: [
         {
@@ -50,9 +47,6 @@ export default Alchemy.Stack(
         CLOUDFLARE_API_TOKEN: apiToken.value,
         CLOUDFLARE_ACCOUNT_ID: Redacted.make(accountId),
         AUTH_TOKENS: authTokens,
-        MOTHERDUCK_HOST: motherDuckHost,
-        MOTHERDUCK_DATABASE: motherDuckDatabase,
-        MOTHERDUCK_TOKEN: motherDuckToken,
         ZOTERO_API_KEY: zoteroApiKey,
         ZOTERO_USER_ID: zoteroUserId,
       },

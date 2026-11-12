@@ -1,20 +1,18 @@
 {
-  "name": "herodotus",
+  "name": "zoti",
   "private": true,
   "packageManager": "bun@1.4.3",
   "workspaces": [
-    "packages/*",
     "apps/*",
     "infra"
   ],
   "scripts": {
-    "typecheck": "tsc --noEmit -p packages/schema && tsc --noEmit -p apps/worker && tsc --noEmit -p apps/extension && tsc --noEmit -p infra && tsc --noEmit -p duckdb",
+    "typecheck": "tsc --noEmit -p apps/worker && tsc --noEmit -p infra",
     "test": "vitest run",
-    "migrate": "bun duckdb/migrate.ts",
-    "extension:build": "bun run --filter @herodotus/extension build"
+    "dev": "bun run --filter @zoti/worker dev",
+    "deploy": "cd infra && bun alchemy deploy --stage prod"
   },
   "devDependencies": {
-    "pg": "8.16.3",
     "typescript": "5.9.3",
     "vitest": "3.2.6"
   }

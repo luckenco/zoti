@@ -1,15 +1,5 @@
-import {
-  Misconfigured,
-  NotFound,
-  RecordId,
-  RecordInput,
-  StoreWriteFailed,
-  type RecordId as RecordIdType,
-} from "@herodotus/schema"
-import { Context, Data, DateTime, Effect, Layer, Schema } from "effect"
-import type { Identity } from "./auth"
-import { IdSource, settleRecord } from "./handler"
-import { ItemStore, type RecordView } from "./motherduck"
+import { Context, Data, DateTime, Effect, Layer } from "effect"
+import { Misconfigured, NotFound } from "./errors"
 
 declare const zoteroItemKey: unique symbol
 export type ZoteroItemKey = string & { readonly [zoteroItemKey]: "ZoteroItemKey" }
@@ -18,16 +8,16 @@ declare const zoteroItemUrl: unique symbol
 export type ZoteroItemUrl = string & { readonly [zoteroItemUrl]: "ZoteroItemUrl" }
 
 export interface ZoteroLink {
-  readonly id: RecordIdType
+  readonly id: string
   readonly zoteroKey: ZoteroItemKey
   readonly zoteroUrl: ZoteroItemUrl
 }
 
 export type SendRequest =
-  | { readonly _tag: "Existing"; readonly id: RecordIdType }
+  | { readonly _tag: "Existing"; readonly id: string }
   | {
       readonly _tag: "Capture"
-      readonly id: RecordIdType | null
+      readonly id: string | null
       readonly url: string
       readonly title: string | null
       readonly site: string | null
@@ -74,10 +64,10 @@ export interface ZoteroPage {
 }
 
 export class ZoteroFailed extends Data.TaggedError("ZoteroFailed")<{
-  readonly id: RecordIdType | null
+  readonly id: string | null
 }> {}
 
-export type SendError = Misconfigured | StoreWriteFailed | NotFound | ZoteroFailed
+export type SendError = Misconfigured | NotFound | ZoteroFailed
 
 export interface ZoteroCall {
   readonly method: "GET" | "POST"
@@ -101,7 +91,7 @@ export interface ZoteroConfig {
 export class Zotero extends Context.Tag("Zotero")<
   Zotero,
   {
-    readonly send: (request: SendRequest, identity: Identity) => Effect.Effect<ZoteroLink, SendError>
+    readonly send: (request: SendRequest) => Effect.Effect<ZoteroLink, SendError>
     readonly search: (query: ZoteroQuery) => Effect.Effect<ZoteroPage, ZoteroFailed | Misconfigured>
   }
 >() {}
@@ -135,7 +125,7 @@ const humanUrl = (value: string): ZoteroItemUrl | undefined =>
 const itemUrl = (userId: ZoteroUserId, key: ZoteroItemKey): ZoteroItemUrl =>
   `https://www.zotero.org/users/${userId}/items/${key}` as ZoteroItemUrl
 
-const herodotusTag = (id: string): string => `herodotus:${id}`
+const zotiTag = (id: string): string => `zoti:${id}`
 
 const writeToken = (id: string): string => id.replaceAll("-", "")
 
@@ -220,7 +210,7 @@ const postCall = (apiKey: string, url: string, body: string, token: string): Zot
 const callRemote = (
   exchange: Exchange,
   apiKey: string,
-  id: RecordIdType | null,
+  id: string | null,
   call: ZoteroCall,
 ): Effect.Effect<ZoteroReply, ZoteroFailed> =>
   Effect.tryPromise({
@@ -232,13 +222,12 @@ const callRemote = (
     },
   })
 
-const failed = (apiKey: string, status: number, body: string, id: RecordIdType | null): ZoteroFailed => {
+const failed = (apiKey: string, status: number, body: string, id: string | null): ZoteroFailed => {
   logRemote(apiKey, status, body)
   return new ZoteroFailed({ id })
 }
 
-const recordIdOf = (value: string): Effect.Effect<RecordIdType, ZoteroFailed> =>
-  Schema.decodeUnknown(RecordId)(value).pipe(Effect.mapError(() => new ZoteroFailed({ id: null })))
+type Webpage = Extract<SendRequest, { _tag: "Capture" }> & { readonly id: string; readonly ts: string }
 
 const utcDay = (iso: string): string => {
   const made = DateTime.make(iso)
@@ -246,7 +235,7 @@ const utcDay = (iso: string): string => {
   return DateTime.formatIsoDateUtc(made.value)
 }
 
-const titled = (row: RecordView): string => {
+const titled = (row: Webpage): string => {
   if (row.title !== null && row.title.length > 0) return row.title
   const line = row.text.split("\n", 1)[0]?.trim() ?? ""
   if (line.length > 0) return line
@@ -254,8 +243,8 @@ const titled = (row: RecordView): string => {
   return "Untitled"
 }
 
-const webpageJson = (row: RecordView): string => {
-  const marker = herodotusTag(row.id)
+const webpageJson = (row: Webpage): string => {
+  const marker = zotiTag(row.id)
   const tags = row.tags.map((tag) => ({ tag }))
   if (!row.tags.includes(marker)) tags.push({ tag: marker })
   return JSON.stringify([
@@ -279,18 +268,11 @@ const alternateHref = (value: unknown): string | undefined => {
 const urlFor = (userId: ZoteroUserId, key: ZoteroItemKey, href: string | undefined): ZoteroItemUrl =>
   (href === undefined ? undefined : humanUrl(href)) ?? itemUrl(userId, key)
 
-const linkFor = (id: RecordIdType, key: ZoteroItemKey, href: string | undefined, userId: ZoteroUserId): ZoteroLink => ({
+const linkFor = (id: string, key: ZoteroItemKey, href: string | undefined, userId: ZoteroUserId): ZoteroLink => ({
   id,
   zoteroKey: key,
   zoteroUrl: urlFor(userId, key, href),
 })
-
-const storedLink = (row: RecordView, id: RecordIdType, userId: ZoteroUserId): ZoteroLink | null => {
-  if (row.zoteroKey === null || row.zoteroUrl === null) return null
-  const key = itemKey(row.zoteroKey)
-  if (key === undefined) return null
-  return linkFor(id, key, row.zoteroUrl, userId)
-}
 
 const keyOf = (item: Record<string, unknown>, data: Record<string, unknown> | null): ZoteroItemKey | undefined => {
   if (typeof item.key === "string") {
@@ -465,7 +447,7 @@ const tagUrl = (userId: ZoteroUserId, id: string): string =>
     ["limit", "5"],
     ["sort", "dateAdded"],
     ["direction", "asc"],
-    ["tag", herodotusTag(id)],
+    ["tag", zotiTag(id)],
   ])}`
 
 const topUrl = (userId: ZoteroUserId, query: ZoteroQuery): string => {
@@ -484,7 +466,7 @@ const childrenUrl = (userId: ZoteroUserId, key: ZoteroItemKey): string =>
 const searchTag = (
   exchange: Exchange,
   ready: ReadyConfig,
-  id: RecordIdType,
+  id: string,
 ): Effect.Effect<ReadonlyArray<RemoteHit>, ZoteroFailed> =>
   Effect.gen(function* () {
     const reply = yield* callRemote(exchange, ready.apiKey, id, getCall(ready.apiKey, tagUrl(ready.userId, id)))
@@ -494,33 +476,18 @@ const searchTag = (
     return hits
   })
 
-const keepLink = (
-  store: Context.Tag.Service<typeof ItemStore>,
-  ready: ReadyConfig,
-  id: RecordIdType,
-  key: ZoteroItemKey,
-  url: ZoteroItemUrl,
-): Effect.Effect<ZoteroLink, SendError> =>
-  Effect.gen(function* () {
-    const stamped = yield* store.stampZotero(id, key, url)
-    const keptKey = itemKey(stamped.zoteroKey)
-    if (keptKey === undefined) return yield* new ZoteroFailed({ id })
-    return linkFor(id, keptKey, stamped.zoteroUrl, ready.userId)
-  })
-
-const fileRow = (
+const send = (
+  config: ZoteroConfig,
   exchange: Exchange,
-  store: Context.Tag.Service<typeof ItemStore>,
-  ready: ReadyConfig,
-  row: RecordView,
+  request: SendRequest,
 ): Effect.Effect<ZoteroLink, SendError> =>
   Effect.gen(function* () {
-    const id = yield* recordIdOf(row.id)
-    const linked = storedLink(row, id, ready.userId)
-    if (linked !== null && linked.zoteroUrl === row.zoteroUrl) return linked
-    if (linked !== null) return yield* keepLink(store, ready, id, linked.zoteroKey, linked.zoteroUrl)
+    const ready = yield* readyConfig(config)
+    const id = request.id ?? (yield* Effect.sync(() => crypto.randomUUID()))
     const found = oldestHit(yield* searchTag(exchange, ready, id))
-    if (found !== null) return yield* keepLink(store, ready, id, found.key, found.zoteroUrl)
+    if (found !== null) return linkFor(id, found.key, found.zoteroUrl, ready.userId)
+    if (request._tag === "Existing") return yield* new NotFound()
+    const ts = DateTime.formatIso(yield* DateTime.now)
     const reply = yield* callRemote(
       exchange,
       ready.apiKey,
@@ -528,91 +495,19 @@ const fileRow = (
       postCall(
         ready.apiKey,
         `${apiBase}/users/${ready.userId}/items`,
-        webpageJson(row),
+        webpageJson({ ...request, id, ts }),
         writeToken(id),
       ),
     )
     if (reply.status === 412) {
       const again = oldestHit(yield* searchTag(exchange, ready, id))
       if (again === null) return yield* failed(ready.apiKey, reply.status, reply.body, id)
-      return yield* keepLink(store, ready, id, again.key, again.zoteroUrl)
+      return linkFor(id, again.key, again.zoteroUrl, ready.userId)
     }
     if (reply.status !== 200) return yield* failed(ready.apiKey, reply.status, reply.body, id)
     const written = parseWrite(reply.body, ready.userId)
     if (written._tag === "Failed") return yield* failed(ready.apiKey, reply.status, reply.body, id)
-    return yield* keepLink(store, ready, id, written.key, written.zoteroUrl)
-  })
-
-const captureOriginal = (request: Extract<SendRequest, { _tag: "Capture" }>): Record<string, unknown> => {
-  const original: Record<string, unknown> = { url: request.url }
-  if (request.title !== null) original.title = request.title
-  if (request.site !== null) original.site = request.site
-  if (request.publishedAt !== null) original.publishedAt = request.publishedAt
-  if (request.text.length > 0) original.text = request.text
-  if (request.tags.length > 0) original.tags = [...request.tags]
-  return original
-}
-
-const insertCapture = (
-  store: Context.Tag.Service<typeof ItemStore>,
-  ids: Context.Tag.Service<typeof IdSource>,
-  request: Extract<SendRequest, { _tag: "Capture" }>,
-  identity: Identity,
-): Effect.Effect<RecordView, SendError> =>
-  Effect.gen(function* () {
-    const ts = DateTime.formatIso(yield* DateTime.now)
-    const decoded = yield* Schema.decodeUnknown(RecordInput)({
-      ...(request.id === null ? {} : { id: request.id }),
-      kind: "page",
-      via: "mcp",
-      url: request.url,
-      title: request.title,
-      site: request.site,
-      publishedAt: request.publishedAt,
-      text: request.text,
-      tags: [...request.tags],
-      ts,
-    }).pipe(Effect.mapError(() => new ZoteroFailed({ id: request.id })))
-    const settled = yield* settleRecord(decoded, captureOriginal(request), identity).pipe(
-      Effect.provideService(IdSource, ids),
-    )
-    yield* store.put([settled])
-    const loaded = yield* store.get(settled.id)
-    if (loaded === null) return yield* new ZoteroFailed({ id: yield* recordIdOf(settled.id) })
-    return loaded
-  })
-
-const loadRow = (
-  store: Context.Tag.Service<typeof ItemStore>,
-  ids: Context.Tag.Service<typeof IdSource>,
-  request: SendRequest,
-  identity: Identity,
-): Effect.Effect<RecordView, SendError> =>
-  Effect.gen(function* () {
-    if (request._tag === "Existing") {
-      const found = yield* store.get(request.id)
-      if (found === null) return yield* new NotFound()
-      return found
-    }
-    if (request.id !== null) {
-      const found = yield* store.get(request.id)
-      if (found !== null) return found
-    }
-    return yield* insertCapture(store, ids, request, identity)
-  })
-
-const send = (
-  config: ZoteroConfig,
-  exchange: Exchange,
-  store: Context.Tag.Service<typeof ItemStore>,
-  ids: Context.Tag.Service<typeof IdSource>,
-  request: SendRequest,
-  identity: Identity,
-): Effect.Effect<ZoteroLink, SendError> =>
-  Effect.gen(function* () {
-    const ready = yield* readyConfig(config)
-    const row = yield* loadRow(store, ids, request, identity)
-    return yield* fileRow(exchange, store, ready, row)
+    return linkFor(id, written.key, written.zoteroUrl, ready.userId)
   })
 
 const search = (
@@ -652,16 +547,8 @@ const search = (
     return { items, nextStart: nextStartOf(query.start, query.limit, items.length, reply.headers) }
   })
 
-export const zoteroLayer = (config: ZoteroConfig): Layer.Layer<Zotero, never, ItemStore | IdSource> =>
-  Layer.effect(
-    Zotero,
-    Effect.gen(function* () {
-      const store = yield* ItemStore
-      const ids = yield* IdSource
-      const exchange = config.exchange ?? defaultExchange
-      return {
-        send: (request, identity) => send(config, exchange, store, ids, request, identity),
-        search: (query) => search(config, exchange, query),
-      }
-    }),
-  )
+export const zoteroLayer = (config: ZoteroConfig): Layer.Layer<Zotero> =>
+  Layer.succeed(Zotero, {
+    send: (request) => send(config, config.exchange ?? defaultExchange, request),
+    search: (query) => search(config, config.exchange ?? defaultExchange, query),
+  })
